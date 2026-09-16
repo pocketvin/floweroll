@@ -8,83 +8,30 @@
 
 ```mermaid
 flowchart TB
-  USER(["👤 用户"])
+  USER["用户"] --> IOS["iPhone<br/>Home · Task · Inbox"]
+  IOS --> RT["Host Runtime<br/>FastAPI · Task · Action · Attempt"]
+  RT --> LG["LangGraph Planner<br/>Context · Memory · Recovery"]
+  LG --> EXEC["Capability & Execution<br/>Registry · Policy · Retry"]
+  EXEC --> VERIFY["Verification / Readback<br/>Timeline · Result → iPhone"]
 
-  subgraph DEVICE["📱 iPhone · 可信交互与原生执行"]
-    direction LR
-    UI["Home · Task · Inbox"]
-    NATIVE["Native Execution<br/>EventKit · AlarmKit · Contacts"]
-    OBS["Observation Capture<br/>Screen · Audio · Camera"]
-    PRESENT["Presentation<br/>SSE · Notification · Live Activity"]
-  end
+  RT -. "durable truth" .-> DB[("SQLite")]
+  MEM[("Mem0")] -. "relevant memory" .-> LG
+  LG <-->|"model call"| MODEL["LLM / Vision"]
+  EXEC --> NATIVE["iPhone Native<br/>Calendar · Alarm · Contacts"]
+  EXEC --> TOOLS["Providers & Host Tools<br/>API · MCP · CLI · PDF · OCR"]
 
-  subgraph HOST["☁️ Floweroll Host · 持久语义与编排"]
-    direction LR
-    API["FastAPI · Pydantic"]
-    RUNTIME["Durable Task Runtime<br/>Task · Action · Attempt"]
-    PLANNER["LangGraph Planner<br/>Context · Memory · Recovery"]
-    CAP["Capability Registry<br/>semantic capabilities"]
-    EXEC["Execution Runtime<br/>policy · retry · reconciliation"]
-    VERIFY["Verification / Readback"]
-    MATERIAL["Materials & Artifacts<br/>PDF · OCR · DOCX"]
-    OBSVC["ObservationService<br/>analysis · summary"]
-  end
+  classDef phone fill:#fff1f5,stroke:#d889a6,color:#5b2638,stroke-width:1.3px;
+  classDef core fill:#f4f7ff,stroke:#7f90c7,color:#26345f,stroke-width:1.3px;
+  classDef data fill:#eef9f3,stroke:#69a68b,color:#214b3a,stroke-width:1.3px;
+  classDef external fill:#f8f5ff,stroke:#9987c2,color:#433768,stroke-width:1.3px;
 
-  subgraph STATE["💾 Durable State"]
-    direction LR
-    TASKDB[("SQLite<br/>Task Truth")]
-    MEMORY[("Mem0<br/>Long-term Memory")]
-    OBSDB[("Observation<br/>SQLite")]
-  end
-
-  subgraph EXTERNAL["🌐 Models & Providers"]
-    direction LR
-    MODELS["LLM / Vision Models"]
-    PROVIDERS["API · MCP · CLI · Web"]
-  end
-
-  USER --> UI
-  UI -->|"Task · 后续输入 · 附件"| API
-  API --> RUNTIME
-  RUNTIME --> PLANNER
-  PLANNER <-->|"retrieve / inject"| MEMORY
-  PLANNER <-->|"model call"| MODELS
-  PLANNER -->|"PlannerDecision"| CAP
-  CAP --> EXEC
-  EXEC --> NATIVE
-  EXEC --> PROVIDERS
-  NATIVE --> VERIFY
-  PROVIDERS --> VERIFY
-  VERIFY -->|"verified result"| RUNTIME
-  RUNTIME <--> TASKDB
-  RUNTIME --> MATERIAL
-  RUNTIME --> PRESENT
-  PRESENT --> UI
-
-  USER -->|"显式开启观察"| OBS
-  OBS --> OBSVC
-  OBSVC <--> OBSDB
-  OBSVC <-->|"vision / summary"| MODELS
-
-  classDef user fill:#fff7ed,stroke:#f59e0b,color:#78350f,stroke-width:1.5px;
-  classDef device fill:#fff1f5,stroke:#d889a6,color:#5b2638,stroke-width:1.2px;
-  classDef host fill:#f4f7ff,stroke:#7f90c7,color:#26345f,stroke-width:1.2px;
-  classDef state fill:#eef9f3,stroke:#69a68b,color:#214b3a,stroke-width:1.2px;
-  classDef external fill:#f8f5ff,stroke:#9987c2,color:#433768,stroke-width:1.2px;
-
-  class USER user;
-  class UI,NATIVE,OBS,PRESENT device;
-  class API,RUNTIME,PLANNER,CAP,EXEC,VERIFY,MATERIAL,OBSVC host;
-  class TASKDB,MEMORY,OBSDB state;
-  class MODELS,PROVIDERS external;
-
-  style DEVICE fill:#fffafd,stroke:#e7b7c9,stroke-width:1px
-  style HOST fill:#fafbff,stroke:#b8c0dc,stroke-width:1px
-  style STATE fill:#f8fcfa,stroke:#add4c2,stroke-width:1px
-  style EXTERNAL fill:#fcfaff,stroke:#c9bee3,stroke-width:1px
+  class USER,IOS,NATIVE phone;
+  class RT,LG,EXEC,VERIFY core;
+  class DB,MEM data;
+  class MODEL,TOOLS external;
 ```
 
-**边界很明确：LangGraph 负责 Planner 内部的决策图；Floweroll Runtime 仍负责 Task / Action / Attempt、授权、verification、recovery 与 SQLite durable truth。**
+**主任务链路如上：LangGraph 负责 Planner 内部决策图；Floweroll Runtime 负责 Task / Action / Attempt、授权、verification、recovery 与 SQLite durable truth。Observation Mode 是独立 lifecycle，单独放在下节，不和 Task 状态机画在一张图里。**
 
 ## 两条真实工作链路
 
