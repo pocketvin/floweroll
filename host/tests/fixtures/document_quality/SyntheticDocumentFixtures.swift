@@ -82,7 +82,11 @@ func makePage(id: String, pageToken: String, includeColor: Bool = false, include
         NSColor.systemRed.setStroke(); oval.lineWidth = 16; oval.stroke()
         let inner = NSBezierPath(ovalIn: NSRect(x: center.x - 105, y: center.y - 105, width: 210, height: 210))
         inner.lineWidth = 8; inner.stroke()
-        text("REDSTAMP", x: 755, y: 305, size: 34, color: .systemRed, bold: true, width: 290)
+        // Keep the red OCR label inside the inner ring. Drawing the glyphs across
+        // the circular stroke makes Vision merge the final letters with the ring
+        // on some macOS revisions, which tests the fixture ambiguity rather than
+        // whether the scan pipeline preserves the stamp.
+        text("REDSTAMP", x: 815, y: 305, size: 34, color: .systemRed, bold: true, width: 210)
     }
 
     if edgeMarkers {
