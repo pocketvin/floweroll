@@ -1,0 +1,5 @@
+# Isolated sidecar only. Not part of the production Host dependency set.
+langfuse==4.15.2
+opentelemetry-sdk==1.44.0
+opentelemetry-exporter-otlp-proto-http==1.44.0
+jsonschema==4.26.0

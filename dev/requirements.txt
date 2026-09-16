@@ -1,0 +1,2 @@
+# Asset validation only; not a production Host dependency.
+Pillow==12.3.0

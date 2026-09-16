@@ -1,0 +1,77 @@
+name: Floweroll
+options:
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: "27.0"
+configFiles:
+  Debug: Config/Build.xcconfig
+  Release: Config/Build.xcconfig
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    CURRENT_PROJECT_VERSION: 2
+    MARKETING_VERSION: 0.1.1
+    GENERATE_INFOPLIST_FILE: NO
+    CODE_SIGN_STYLE: Automatic
+
+packages:
+  RiveRuntime:
+    path: Packages/RiveRuntime
+
+targets:
+  Floweroll:
+    type: application
+    platform: iOS
+    sources:
+      - path: Floweroll/App
+      - path: Floweroll/Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.maxenceyu.floweroll
+        INFOPLIST_FILE: Floweroll/App/Info.plist
+        PRODUCT_NAME: Floweroll
+        TARGETED_DEVICE_FAMILY: "1"
+    dependencies:
+      - target: FlowerollLiveActivity
+        embed: true
+      - package: RiveRuntime
+        product: RiveRuntime
+      - sdk: AppIntents.framework
+
+  FlowerollLiveActivity:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Floweroll/LiveActivity
+      - path: Floweroll/Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.maxenceyu.floweroll.liveactivity
+        INFOPLIST_FILE: Floweroll/LiveActivity/Info.plist
+        PRODUCT_NAME: FlowerollLiveActivity
+        SKIP_INSTALL: YES
+        APPLICATION_EXTENSION_API_ONLY: YES
+        TARGETED_DEVICE_FAMILY: "1"
+
+  FlowerollTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: FlowerollTests
+    dependencies:
+      - target: Floweroll
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.maxenceyu.floweroll.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  Floweroll:
+    build:
+      targets:
+        Floweroll: all
+        FlowerollLiveActivity: all
+    run:
+      config: Debug
+    test:
+      targets: [FlowerollTests]

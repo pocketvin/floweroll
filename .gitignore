@@ -1,0 +1,46 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+!.env.*.example
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+work/
+outputs/
+test-results/
+node_modules/
+
+# Private development configuration and signing material
+Local.xcconfig
+Secrets.xcconfig
+*.p8
+*.p12
+*.pfx
+*.pem
+*.key
+*.mobileprovision
+
+# Xcode / Swift local state and build outputs
+xcuserdata/
+*.xcuserstate
+DerivedData/
+.build/
+*.xcresult/
+*.xcarchive/
+*.ipa
+
+# Runtime records are never source-code fixtures
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3-shm
+*.sqlite3-wal
+*.log
+coverage/
+htmlcov/
+.coverage

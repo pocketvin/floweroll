@@ -1,0 +1,1307 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		00A0083A80E171285E45EAEA /* RiveRuntime in Frameworks */ = {isa = PBXBuildFile; productRef = 6C3ACF17EE7DB5350AA2DA95 /* RiveRuntime */; };
+		02789E9028DD6E0610AF2A99 /* TaskFileExportCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 227C889C7B504B94DB006CC9 /* TaskFileExportCoordinator.swift */; };
+		04508446DCBEF7CD3B734910 /* InstalledIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0FDE1B0AAF3E4DE13C8682F /* InstalledIdentityTests.swift */; };
+		0660CB3DAC6C2EEF24F3A558 /* HomeTimeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 622B07462065F5213EACEF87 /* HomeTimeline.swift */; };
+		0704631F14EB75699708D350 /* NotifyUserExecutorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1389E4F94F64BDD80B37EF85 /* NotifyUserExecutorTests.swift */; };
+		0727C38F1B6A59DE387FED58 /* TaskCancellationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0FF3E5DA05A412AE89BC76F /* TaskCancellationTests.swift */; };
+		07C59952984CCB0CB5562CED /* CalendarCreateExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4456CFFBF9C95B56F01740D3 /* CalendarCreateExecutor.swift */; };
+		07F49864F421C6020C63BD4C /* DeveloperObservabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AF0E719F7FB713F7ED8AE35 /* DeveloperObservabilityTests.swift */; };
+		09C18C467E51351F728CC496 /* DeviceReconciliationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 074CD107E57B7E15D074CC2D /* DeviceReconciliationTests.swift */; };
+		0B6F0C3B4E038B2E14009681 /* RuntimeArtifactViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = D295D73F2343545953DEEBA5 /* RuntimeArtifactViews.swift */; };
+		0BE4D184F45D5F7AC5738522 /* FlowerollTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EE570DC1A5D3CB6AA0E271A /* FlowerollTheme.swift */; };
+		0E0C85E63B5ADA3C3955C933 /* TerminalReviewVisibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C7DC2D9294F67542C376667 /* TerminalReviewVisibility.swift */; };
+		0FDDE304B795D9B4ACCD92A1 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C681E82602A7DADBA4E8FFBC /* ContentView.swift */; };
+		175677F5134B0968D8C64654 /* PendingSubmissionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9011117915ED333ADC471403 /* PendingSubmissionStore.swift */; };
+		18A13AB155B19D0AD211625B /* LocationCurrentExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46E3C14C10AC0EE718532563 /* LocationCurrentExecutor.swift */; };
+		1BF9B6251412E0A5852F634E /* CompletionAttentionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38012641BC8256ACF664E959 /* CompletionAttentionPolicy.swift */; };
+		1C63E5D22F871DF0B8562055 /* AlarmSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBCB378A0C8BEF13703CED3E /* AlarmSettingsView.swift */; };
+		22BB0BC80C561C6D79BEAC85 /* ToolSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6393D33584C8CD869338BFC /* ToolSettingsView.swift */; };
+		2440CA8C56164F10D8BF3CFD /* FlowerollLiveActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 21D6747ECAD1D616AF3B5CB5 /* FlowerollLiveActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		2625165CDD184CC4120A533E /* ScheduleHubModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96A6B77D2FCCCC6C8BEEC1E9 /* ScheduleHubModel.swift */; };
+		28C6F716810C0BEE733B8168 /* ContactsQueryExecutorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 921580526C4253EA0AF5872D /* ContactsQueryExecutorTests.swift */; };
+		28D6CEF4A709E3C04AE6ABE3 /* RuntimeTaskDetailModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70B5505101110C09536721B8 /* RuntimeTaskDetailModel.swift */; };
+		2D456B63430DC82CAAA91331 /* TaskFileExportModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B34EC133DD3A1573522B391 /* TaskFileExportModels.swift */; };
+		2DA7F21EF672D799C609E42E /* ShellPerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD58CEAAB508C3BFE81BCDED /* ShellPerformanceTests.swift */; };
+		3293FF143B12C932A84BD0DD /* PhotoLibrarySave.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CC73AC961E991EB8AE0EF98 /* PhotoLibrarySave.swift */; };
+		38C000B1AA39835E99279D85 /* AlarmManagement.swift in Sources */ = {isa = PBXBuildFile; fileRef = C839E2810DEA857A3689E6E8 /* AlarmManagement.swift */; };
+		3ADB53A2F60931747ECB919F /* TaskHistorySortTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CED723AC13EEFE8458443EC2 /* TaskHistorySortTests.swift */; };
+		3BE534A1FE96D51129885A3F /* HomeInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100F1BB46A0C2D20DB49BA0 /* HomeInbox.swift */; };
+		3C23E183302F23E73ECEB310 /* HostCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8504897F53BF4BAAC64C9D24 /* HostCredentialStore.swift */; };
+		3D904E7CD5AAFBDCB5905225 /* RuntimeThreadDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68737B929ED5F3693E6D42AD /* RuntimeThreadDetailView.swift */; };
+		4069C06F2E36D9C4A4F95B2D /* ThemeSystemTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAF574FD2A7E428F8B4E23C4 /* ThemeSystemTests.swift */; };
+		450A984C92C9172834997B54 /* ObservationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610DDDA106B90A750552F06 /* ObservationController.swift */; };
+		4604AA42061068F1A2B0B2C2 /* DeviceBackgroundExecutionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58FFE4C1100AD4F6CBF2FA99 /* DeviceBackgroundExecutionController.swift */; };
+		46AB658034BF8A80A91059DC /* HostModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01AADB1F727192C6D3AD178 /* HostModels.swift */; };
+		47D9416F4DC57A82131D9F8E /* SystemEntryRuntimeCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E645D6AB1D82AA3829758A9 /* SystemEntryRuntimeCoordinator.swift */; };
+		4904C0261E5A9F1511EDBAA0 /* TaskPresentationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1574AC3AE81B86942EF06B14 /* TaskPresentationPolicy.swift */; };
+		49E06D5FB0A67A705293470F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 574149C49818CA02FF5111AD /* Assets.xcassets */; };
+		49F9E6C3070AAFFCCCB5FC35 /* TaskMaterialsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFF128403E9501197D0597CB /* TaskMaterialsTests.swift */; };
+		4AC51B7E6B67573BE424D2F1 /* TaskListNativeScroller.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE8B20F4C10E3E62DFB050CC /* TaskListNativeScroller.swift */; };
+		4DAC0D6FC8D84A4A2AB038F4 /* TaskHistoryRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5DD65EC37B55182923D112B /* TaskHistoryRecoveryTests.swift */; };
+		4ED10FD2BDBEC76B73514856 /* TaskInboxRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 767CF391A534E3AA99C436AD /* TaskInboxRecoveryTests.swift */; };
+		506D2699CD8069A379F43D44 /* RuntimeCanonicalTaskDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B476274BD82F3FFE03E77DF4 /* RuntimeCanonicalTaskDetailView.swift */; };
+		50AAD56B46332583EAFE12B1 /* ScheduleHubView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B9304FE96B96B3BFCF3932D /* ScheduleHubView.swift */; };
+		550B2C487641F2609B5BAD50 /* NotifyUserExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BB90571A277381DC44D98FE /* NotifyUserExecutor.swift */; };
+		589D5010825099FB1759D306 /* SystemEntryOwnershipTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDFB8F59E89B2BDA5681A97D /* SystemEntryOwnershipTests.swift */; };
+		58CD1F9830E3DC20E09ED16A /* floweroll-home.riv in Resources */ = {isa = PBXBuildFile; fileRef = 51BCDF98F35E12A5EF2CD9B3 /* floweroll-home.riv */; };
+		5A19FAA55CC1C7F991FA4168 /* HomeRefreshTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88162322A6E6709B080E0712 /* HomeRefreshTests.swift */; };
+		5B21A4006D09000637E1A1FF /* AlarmNativeExecution.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42B0A662D2A9F52CA96C14CA /* AlarmNativeExecution.swift */; };
+		5B31688327338A68F68FCFBD /* FlowerollMascotView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 840B281CD59E7720857656F3 /* FlowerollMascotView.swift */; };
+		5DD4FDBB0330347A2DEC1138 /* ContactsQueryExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D155C6CBE47D5E151F70593 /* ContactsQueryExecutor.swift */; };
+		5FAE0C63A3C1CA020FCAC9B8 /* TerminalReviewPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7391B56C29A6963F8FC247FA /* TerminalReviewPolicy.swift */; };
+		6174B689191926F8EA32287B /* NativeCapabilityDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62A7F791C4F34C9148377911 /* NativeCapabilityDiagnostics.swift */; };
+		61CBB0FAAB216F3EBB22033F /* GlobalInputRoutingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A971F37074994CDB8C5CCF0B /* GlobalInputRoutingTests.swift */; };
+		61F799CA270F8AC727ED9313 /* CalendarCreateExecutorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFE78BFA7E8CD943E413D6A5 /* CalendarCreateExecutorTests.swift */; };
+		6256B64C201A8C074003ACEA /* PermissionSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6521ACEC743A3ED8C574F990 /* PermissionSettingsView.swift */; };
+		64FB919B7F88A01A8624569B /* TaskFileExportStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A5187162FD78C971A644169 /* TaskFileExportStore.swift */; };
+		667C3D4556A2F9431D0D1428 /* RuntimeThreadDetailModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A5EE531A088D80EF83A10CF /* RuntimeThreadDetailModel.swift */; };
+		66F409B1056BF5389232546F /* MaterialAttachmentStabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52D28BCEDF217557CDDC39D2 /* MaterialAttachmentStabilityTests.swift */; };
+		6A73CA88BB4AC7729EA43943 /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2902742861027B3254E69A85 /* AppIntents.framework */; };
+		6A77F611B5BF7EDD4DEC2BBE /* SystemPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A21996CBC8D20BC57F4A02B /* SystemPresentationTests.swift */; };
+		6AE97FF13D25C0253ECD4915 /* TaskMaterial.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA6DF7337A7CB0E54CF0ECC7 /* TaskMaterial.swift */; };
+		6C0F87265C382E0FB2E70B57 /* HomeStages.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EE2869B6B3E2335B183B2C6 /* HomeStages.swift */; };
+		716872DCCAB6E9ABD05AD590 /* ReminderCreateExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD0476C3747C62DF0B16BF21 /* ReminderCreateExecutor.swift */; };
+		741A846222DB83E5DA35BE89 /* AlarmExecutorsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89B0AF145C9DB03C3156407E /* AlarmExecutorsTests.swift */; };
+		74FFA4826636570B15D9C719 /* RuntimeStructuredResultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46C9E509D72BC9C7B0458B7A /* RuntimeStructuredResultView.swift */; };
+		78D140115D5BCCB74ED4C4E3 /* ProductSourceFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AE4192BE24F80BEAF130936 /* ProductSourceFiles.swift */; };
+		79A4C4CCC2BB1601726BE48D /* TaskMaterialManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE63FD25629EB2C9212F90B7 /* TaskMaterialManifest.swift */; };
+		82EE6738B70BB9A01DFC92F3 /* ScheduleAggregation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73B7A81563CB812F33F1EFE9 /* ScheduleAggregation.swift */; };
+		8732C0327D6405003A9CBB11 /* PhotoLibrarySaveTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3AF44F5F3D2BADC813147F6 /* PhotoLibrarySaveTests.swift */; };
+		89561BD9A18E8EEF16F0F406 /* TaskListRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFF49D50239922F8A4BD4E2C /* TaskListRows.swift */; };
+		89A2519E28968F2673C54B62 /* AlarmCancelExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C59049C5CF482CFD51F35197 /* AlarmCancelExecutor.swift */; };
+		8A62EF2F02E31B47E66C97FE /* RuntimeConnectionSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D4C42D911BA71346859304B /* RuntimeConnectionSettingsView.swift */; };
+		8DBEFDCE6844138F5428202F /* CompletionAttentionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A9CD56309C797B94EAE71D3 /* CompletionAttentionTests.swift */; };
+		8DDFEBDFD3B1E8B48B880BCE /* AttachmentBackgroundUploadTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DBCFEFC4A73B87922A1FA02 /* AttachmentBackgroundUploadTransport.swift */; };
+		8E8907BB5F81FAE4F784035B /* FlowerollMascotLabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D9F6123A25090AE300026D6 /* FlowerollMascotLabView.swift */; };
+		8F2D085CEF12EC9E652C514B /* CalendarReadExecutors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B3F30E355EC133D75A63715 /* CalendarReadExecutors.swift */; };
+		8FE27B91D2EBE7155D9CC6D7 /* FlowerollLiveActivityBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15C4C60513ACC5939D49358E /* FlowerollLiveActivityBundle.swift */; };
+		9299F8C019E769C28CD6E319 /* AppShellNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1503B094B7656F8975DFB069 /* AppShellNavigation.swift */; };
+		92AC20B0A1E5DEE035E1C3D6 /* HostTaskLiveSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = D17C48808D7A5D34DC0973ED /* HostTaskLiveSession.swift */; };
+		9468373843953615364A3DFB /* RuntimeTaskStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74B0BE960568CF5136C9A5C2 /* RuntimeTaskStore.swift */; };
+		94C0FA742CED4A6526507639 /* FlowerollLiveActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11EE9B19231FF09DE85B3B8 /* FlowerollLiveActivityWidget.swift */; };
+		958C15844A7AE3247A1471A7 /* D17AlarmHarnessCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 228DAFF690A8814433327346 /* D17AlarmHarnessCore.swift */; };
+		960FBC1C417F259270E7A85F /* ObservationCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1C372B94B7BE8C24EB494D7 /* ObservationCapture.swift */; };
+		993E6D51FE4A81C02A2BB826 /* InteractionTestFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 873FDF56D9CC4F6512640BFE /* InteractionTestFixtures.swift */; };
+		9B852826178C719412CDDDBB /* FlowerollPresentationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A08E73BB695F2F6BE572723 /* FlowerollPresentationView.swift */; };
+		9C6C71E0F56EB98ACA576013 /* D17PhysicalAlarmHarnessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC310CF71532A3B611B3CEF6 /* D17PhysicalAlarmHarnessTests.swift */; };
+		9D28E82C6E9FB925328736D9 /* ObservationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 999D122769B697C25CB44FF9 /* ObservationTests.swift */; };
+		A03EE90035FACD1230C5F87A /* BackgroundAttachmentUploadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85D4432301828BC215D8933B /* BackgroundAttachmentUploadTests.swift */; };
+		A233EB8A1468078D9E0DF1D5 /* FlowerollActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7029C26C818C7F3E8FB00FB2 /* FlowerollActivityAttributes.swift */; };
+		A9372F4C6C42AF3EF4D7E697 /* HomeScrollPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0331EFF06FB2A803C227FB99 /* HomeScrollPolicy.swift */; };
+		A9E06E24AFA4918C8EC3A5C9 /* ScheduleModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1ADAFA9E5AEEE9743974FCA /* ScheduleModels.swift */; };
+		AA771D6CE357DD4C0EF9FD9B /* FlowerollActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7029C26C818C7F3E8FB00FB2 /* FlowerollActivityAttributes.swift */; };
+		AD57DB3C8C924D93CD15B723 /* FlowerollApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5115CF57011985C7093DA22 /* FlowerollApp.swift */; };
+		B0263A5472E49C1DE0FD0468 /* TaskPresentationPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3E22E4A5DEFE5DE8E9EE75E /* TaskPresentationPolicyTests.swift */; };
+		B163115F92C56F0575174A09 /* LocationPermissionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6177B2D789FBF833D9098FF6 /* LocationPermissionModel.swift */; };
+		B22002A25C5D44DB4942017A /* GlobalInputRoutingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 941718E6498AD9B68904E8EB /* GlobalInputRoutingModels.swift */; };
+		B31BA47BB4A6826F16653407 /* HomeCompletionAttentionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0B83D792E96EEED48B72673 /* HomeCompletionAttentionPolicy.swift */; };
+		B3B1161EF121FA46513B82CC /* DeviceRuntimeWorker.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CE7EC9F2137DB273E6E651 /* DeviceRuntimeWorker.swift */; };
+		B4C5A033DEE98DE99ED39440 /* FlowerollMascotView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 840B281CD59E7720857656F3 /* FlowerollMascotView.swift */; };
+		B4E2B13E1377DF4A42910C30 /* AlarmReadExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7EEA932A76EA34B165DA449 /* AlarmReadExecutor.swift */; };
+		B56930FD53692C95E4D32C7B /* FlowerollActivitySession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B90227A433842C609CB43D3C /* FlowerollActivitySession.swift */; };
+		B67B1002E327511B81948F38 /* RuntimeTaskComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13EB30A9F92C5A60BBF9C8BE /* RuntimeTaskComponents.swift */; };
+		B85ADB9161A87C0751DFDB01 /* PrototypeDeveloperConsoleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04124A842ED906B76ECE6A33 /* PrototypeDeveloperConsoleView.swift */; };
+		B9820FDC26BCDC597ED9C2A9 /* AlarmCreateExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6179B693B39BF0B49B9C7A2 /* AlarmCreateExecutor.swift */; };
+		BADE338B1AF3DDC5EDD942FC /* DeveloperObservabilityViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3D1F0370A0164438D5B5713 /* DeveloperObservabilityViews.swift */; };
+		BD36757E77494F4B34B4A646 /* DeviceActionJournal.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D9C019CBF5F6E2D2BD1A78A /* DeviceActionJournal.swift */; };
+		BF2E0493BF0BBA071FCCB11E /* ContactsManagementExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36F5F7257BEBA15686FE8545 /* ContactsManagementExecutor.swift */; };
+		C6FD22A1C35C1F53C6A41182 /* AppShellCompletionAttentionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 147894621B3164C54DBEAE7D /* AppShellCompletionAttentionCard.swift */; };
+		C7662BB3B81AFF154389C643 /* verify_theme_color_inventory.py in Resources */ = {isa = PBXBuildFile; fileRef = 4551025831A9DD779EAB2472 /* verify_theme_color_inventory.py */; };
+		C9852610110A49766C9A1B84 /* FlowerollRiveContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96A52E7F56AC204579F0191C /* FlowerollRiveContractTests.swift */; };
+		CA739C361E065A131ED96E78 /* TaskAttachmentModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 890FACA1100D4BBA94E69FCB /* TaskAttachmentModels.swift */; };
+		CAA6260B3BB2BF8ED9493FE0 /* DeviceExecutionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BF66E853B9835F8C451598A /* DeviceExecutionCoordinator.swift */; };
+		CB0DF917A546997580492B9E /* TaskAttachmentDraft.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50A5BCB878D39027CFF10C45 /* TaskAttachmentDraft.swift */; };
+		D1E209498EE4697A36E4D360 /* HomeThreadEpisodeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38A96CD7834AAB0B9EF2DF06 /* HomeThreadEpisodeView.swift */; };
+		D58E0C3835038D28914E5599 /* AttachmentUploadTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F42615E77F5377BDB98AE997 /* AttachmentUploadTransport.swift */; };
+		D61D164EF875A415C7BE5FFB /* TasksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 211E8D28E4B3F7D520654101 /* TasksView.swift */; };
+		D62B32EBB8A5BCBB424AED16 /* RuntimeTaskDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CD169FCEB8A688DB60D121B /* RuntimeTaskDetailView.swift */; };
+		D6DC2F0A5CBE14A5EF82EABB /* HomeScrollPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C47926CE07DD27A4F13470 /* HomeScrollPolicyTests.swift */; };
+		D953A4308939E53E71763847 /* TaskAttachmentCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D8A123F466ADDC7336BBB0E /* TaskAttachmentCapture.swift */; };
+		D9CA9892709A013ADFEC781B /* ObservationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38E0B43F96C3FA57C3BCC024 /* ObservationModels.swift */; };
+		DA6B9F86AA67FBB6B18BEF41 /* AudioCaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5793B7A6C8365859FCC6C53 /* AudioCaptureService.swift */; };
+		DD7C97ACEA2F588CB90BA33E /* RuntimeCompletionAttentionOwner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4BF5DEB29140E176C860A9E4 /* RuntimeCompletionAttentionOwner.swift */; };
+		E17EC6B988CD0103D11D1146 /* RuntimeTimelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6998FEF5DF5FAE60F9EA3A5 /* RuntimeTimelineView.swift */; };
+		E1B0E253E35CCE802C2EB2E6 /* ObservationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF7FDDDDDBD4D1C4DF7D11F2 /* ObservationView.swift */; };
+		E3C5392748BB3B7B9E72717A /* FlowerollHostClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB464908FFC3BAA9B31F84CA /* FlowerollHostClient.swift */; };
+		E5651399E5FFEA8FDDB3388A /* TerminalReviewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8F39A32B84FF51FE08235BF /* TerminalReviewTests.swift */; };
+		E58FE5C6F4E9CEB9F9878EF3 /* FlowerollIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FC3B7B15CC433ED3D6E6B8A /* FlowerollIntents.swift */; };
+		E63BF04E2AC0C532F9DC27F8 /* TaskMaterialsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 452E618592EBC9A5A777991B /* TaskMaterialsPanel.swift */; };
+		E8F497A3E4D4DCB4E82A51EF /* GlobalInputRoutingPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08E6F1085F3ADBFEF9BFF60A /* GlobalInputRoutingPolicy.swift */; };
+		EACAD3E415E1EFCAF3857DE3 /* NotificationRoutingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 822F6074D5AE0FC8650D47C0 /* NotificationRoutingTests.swift */; };
+		EE333E309DBDE1A2ECF396B0 /* RuntimeInteractionPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A093CA22A261314B57DCDC7 /* RuntimeInteractionPolicyTests.swift */; };
+		F022D34163EFD1AE11E556BC /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39C8802B04EC2600FBFDC563 /* HomeView.swift */; };
+		F0AF885FC357B70CF5B87D5F /* ScheduleRemovalCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F34374C6597FBFBED3ED04D7 /* ScheduleRemovalCoordinator.swift */; };
+		F176E91FBBE7821F8BB2F630 /* TaskAttachmentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E3125DC1234B2FF5AF94D41 /* TaskAttachmentViews.swift */; };
+		F28C023387A9898352F6FD84 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 574149C49818CA02FF5111AD /* Assets.xcassets */; };
+		F877B4A99D7BCB277F79FCEB /* HomePresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11900D67735F7C01E6053354 /* HomePresentationTests.swift */; };
+		F88A562DBB848E5DDF61CA90 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8F2A83E16D653E8D8C2B1C8 /* SettingsView.swift */; };
+		F8C9F05EE78A37602336B44C /* RuntimeEpisodeInteractionViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02D454C677A1C694796D9FA9 /* RuntimeEpisodeInteractionViews.swift */; };
+		FB798B44ABF93D1ED19E5BC7 /* HomeFocusedTaskStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC5084C735D5952A703BF4A7 /* HomeFocusedTaskStage.swift */; };
+		FEDBAB5672881F4A62F687B5 /* ScheduleSources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A6C88055E6BE9029BD3F5D3 /* ScheduleSources.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		8392FF0AE77749E1C95097FD /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F7E65D3697E7F014ACCE97BD /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8C756F0CA6145E862F7878B9;
+			remoteInfo = FlowerollLiveActivity;
+		};
+		B69A0BA2044BF361D9FA54A6 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F7E65D3697E7F014ACCE97BD /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F75FD45085558F651D4D2F63;
+			remoteInfo = Floweroll;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		F592F5708C5829C3CC1FB2BB /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				2440CA8C56164F10D8BF3CFD /* FlowerollLiveActivity.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		02D454C677A1C694796D9FA9 /* RuntimeEpisodeInteractionViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeEpisodeInteractionViews.swift; sourceTree = "<group>"; };
+		0331EFF06FB2A803C227FB99 /* HomeScrollPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeScrollPolicy.swift; sourceTree = "<group>"; };
+		04124A842ED906B76ECE6A33 /* PrototypeDeveloperConsoleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeDeveloperConsoleView.swift; sourceTree = "<group>"; };
+		066B71E721BD224CE1C01B7A /* Build.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Build.xcconfig; sourceTree = "<group>"; };
+		074CD107E57B7E15D074CC2D /* DeviceReconciliationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceReconciliationTests.swift; sourceTree = "<group>"; };
+		08E6F1085F3ADBFEF9BFF60A /* GlobalInputRoutingPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalInputRoutingPolicy.swift; sourceTree = "<group>"; };
+		0A9CD56309C797B94EAE71D3 /* CompletionAttentionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionAttentionTests.swift; sourceTree = "<group>"; };
+		0C7DC2D9294F67542C376667 /* TerminalReviewVisibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalReviewVisibility.swift; sourceTree = "<group>"; };
+		0D155C6CBE47D5E151F70593 /* ContactsQueryExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactsQueryExecutor.swift; sourceTree = "<group>"; };
+		0D8A123F466ADDC7336BBB0E /* TaskAttachmentCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskAttachmentCapture.swift; sourceTree = "<group>"; };
+		0D9F6123A25090AE300026D6 /* FlowerollMascotLabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowerollMascotLabView.swift; sourceTree = "<group>"; };
+		11900D67735F7C01E6053354 /* HomePresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomePresentationTests.swift; sourceTree = "<group>"; };
+		1389E4F94F64BDD80B37EF85 /* NotifyUserExecutorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotifyUserExecutorTests.swift; sourceTree = "<group>"; };
+		13EB30A9F92C5A60BBF9C8BE /* RuntimeTaskComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeTaskComponents.swift; sourceTree = "<group>"; };
+		147894621B3164C54DBEAE7D /* AppShellCompletionAttentionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShellCompletionAttentionCard.swift; sourceTree = "<group>"; };
+		1503B094B7656F8975DFB069 /* AppShellNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShellNavigation.swift; sourceTree = "<group>"; };
+		1574AC3AE81B86942EF06B14 /* TaskPresentationPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskPresentationPolicy.swift; sourceTree = "<group>"; };
+		15C4C60513ACC5939D49358E /* FlowerollLiveActivityBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowerollLiveActivityBundle.swift; sourceTree = "<group>"; };
+		211E8D28E4B3F7D520654101 /* TasksView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TasksView.swift; sourceTree = "<group>"; };
+		21D6747ECAD1D616AF3B5CB5 /* FlowerollLiveActivity.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = FlowerollLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		227C889C7B504B94DB006CC9 /* TaskFileExportCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskFileExportCoordinator.swift; sourceTree = "<group>"; };
+		228DAFF690A8814433327346 /* D17AlarmHarnessCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = D17AlarmHarnessCore.swift; sourceTree = "<group>"; };
+		2902742861027B3254E69A85 /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
+		2A5EE531A088D80EF83A10CF /* RuntimeThreadDetailModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeThreadDetailModel.swift; sourceTree = "<group>"; };
+		2BF66E853B9835F8C451598A /* DeviceExecutionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceExecutionCoordinator.swift; sourceTree = "<group>"; };
+		2E645D6AB1D82AA3829758A9 /* SystemEntryRuntimeCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemEntryRuntimeCoordinator.swift; sourceTree = "<group>"; };
+		36F5F7257BEBA15686FE8545 /* ContactsManagementExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactsManagementExecutor.swift; sourceTree = "<group>"; };
+		38012641BC8256ACF664E959 /* CompletionAttentionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionAttentionPolicy.swift; sourceTree = "<group>"; };
+		38A96CD7834AAB0B9EF2DF06 /* HomeThreadEpisodeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeThreadEpisodeView.swift; sourceTree = "<group>"; };
+		38E0B43F96C3FA57C3BCC024 /* ObservationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObservationModels.swift; sourceTree = "<group>"; };
+		39C8802B04EC2600FBFDC563 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		3A21996CBC8D20BC57F4A02B /* SystemPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemPresentationTests.swift; sourceTree = "<group>"; };
+		3AF0E719F7FB713F7ED8AE35 /* DeveloperObservabilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperObservabilityTests.swift; sourceTree = "<group>"; };
+		3E3125DC1234B2FF5AF94D41 /* TaskAttachmentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskAttachmentViews.swift; sourceTree = "<group>"; };
+		42B0A662D2A9F52CA96C14CA /* AlarmNativeExecution.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmNativeExecution.swift; sourceTree = "<group>"; };
+		4456CFFBF9C95B56F01740D3 /* CalendarCreateExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarCreateExecutor.swift; sourceTree = "<group>"; };
+		452E618592EBC9A5A777991B /* TaskMaterialsPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskMaterialsPanel.swift; sourceTree = "<group>"; };
+		4551025831A9DD779EAB2472 /* verify_theme_color_inventory.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = verify_theme_color_inventory.py; sourceTree = "<group>"; };
+		46C9E509D72BC9C7B0458B7A /* RuntimeStructuredResultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeStructuredResultView.swift; sourceTree = "<group>"; };
+		46E3C14C10AC0EE718532563 /* LocationCurrentExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationCurrentExecutor.swift; sourceTree = "<group>"; };
+		4BF5DEB29140E176C860A9E4 /* RuntimeCompletionAttentionOwner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeCompletionAttentionOwner.swift; sourceTree = "<group>"; };
+		4CC73AC961E991EB8AE0EF98 /* PhotoLibrarySave.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibrarySave.swift; sourceTree = "<group>"; };
+		505B30B155B35D440502D14C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		50A5BCB878D39027CFF10C45 /* TaskAttachmentDraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskAttachmentDraft.swift; sourceTree = "<group>"; };
+		51BCDF98F35E12A5EF2CD9B3 /* floweroll-home.riv */ = {isa = PBXFileReference; path = "floweroll-home.riv"; sourceTree = "<group>"; };
+		52D28BCEDF217557CDDC39D2 /* MaterialAttachmentStabilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaterialAttachmentStabilityTests.swift; sourceTree = "<group>"; };
+		574149C49818CA02FF5111AD /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		58FFE4C1100AD4F6CBF2FA99 /* DeviceBackgroundExecutionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceBackgroundExecutionController.swift; sourceTree = "<group>"; };
+		5A5187162FD78C971A644169 /* TaskFileExportStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskFileExportStore.swift; sourceTree = "<group>"; };
+		5BB90571A277381DC44D98FE /* NotifyUserExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotifyUserExecutor.swift; sourceTree = "<group>"; };
+		5D4C42D911BA71346859304B /* RuntimeConnectionSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeConnectionSettingsView.swift; sourceTree = "<group>"; };
+		6177B2D789FBF833D9098FF6 /* LocationPermissionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationPermissionModel.swift; sourceTree = "<group>"; };
+		622B07462065F5213EACEF87 /* HomeTimeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeTimeline.swift; sourceTree = "<group>"; };
+		62A7F791C4F34C9148377911 /* NativeCapabilityDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCapabilityDiagnostics.swift; sourceTree = "<group>"; };
+		6521ACEC743A3ED8C574F990 /* PermissionSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionSettingsView.swift; sourceTree = "<group>"; };
+		68737B929ED5F3693E6D42AD /* RuntimeThreadDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeThreadDetailView.swift; sourceTree = "<group>"; };
+		6A08E73BB695F2F6BE572723 /* FlowerollPresentationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowerollPresentationView.swift; sourceTree = "<group>"; };
+		7029C26C818C7F3E8FB00FB2 /* FlowerollActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowerollActivityAttributes.swift; sourceTree = "<group>"; };
+		70B5505101110C09536721B8 /* RuntimeTaskDetailModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeTaskDetailModel.swift; sourceTree = "<group>"; };
+		7391B56C29A6963F8FC247FA /* TerminalReviewPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalReviewPolicy.swift; sourceTree = "<group>"; };
+		73B7A81563CB812F33F1EFE9 /* ScheduleAggregation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleAggregation.swift; sourceTree = "<group>"; };
+		74B0BE960568CF5136C9A5C2 /* RuntimeTaskStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeTaskStore.swift; sourceTree = "<group>"; };
+		767CF391A534E3AA99C436AD /* TaskInboxRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskInboxRecoveryTests.swift; sourceTree = "<group>"; };
+		7A6C88055E6BE9029BD3F5D3 /* ScheduleSources.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleSources.swift; sourceTree = "<group>"; };
+		7AE4192BE24F80BEAF130936 /* ProductSourceFiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductSourceFiles.swift; sourceTree = "<group>"; };
+		7B3F30E355EC133D75A63715 /* CalendarReadExecutors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarReadExecutors.swift; sourceTree = "<group>"; };
+		7EE570DC1A5D3CB6AA0E271A /* FlowerollTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowerollTheme.swift; sourceTree = "<group>"; };
+		822F6074D5AE0FC8650D47C0 /* NotificationRoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationRoutingTests.swift; sourceTree = "<group>"; };
+		840B281CD59E7720857656F3 /* FlowerollMascotView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowerollMascotView.swift; sourceTree = "<group>"; };
+		8504897F53BF4BAAC64C9D24 /* HostCredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostCredentialStore.swift; sourceTree = "<group>"; };
+		85D4432301828BC215D8933B /* BackgroundAttachmentUploadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundAttachmentUploadTests.swift; sourceTree = "<group>"; };
+		873FDF56D9CC4F6512640BFE /* InteractionTestFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractionTestFixtures.swift; sourceTree = "<group>"; };
+		88162322A6E6709B080E0712 /* HomeRefreshTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeRefreshTests.swift; sourceTree = "<group>"; };
+		890FACA1100D4BBA94E69FCB /* TaskAttachmentModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskAttachmentModels.swift; sourceTree = "<group>"; };
+		89B0AF145C9DB03C3156407E /* AlarmExecutorsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmExecutorsTests.swift; sourceTree = "<group>"; };
+		8A093CA22A261314B57DCDC7 /* RuntimeInteractionPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeInteractionPolicyTests.swift; sourceTree = "<group>"; };
+		8CD169FCEB8A688DB60D121B /* RuntimeTaskDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeTaskDetailView.swift; sourceTree = "<group>"; };
+		8EE2869B6B3E2335B183B2C6 /* HomeStages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeStages.swift; sourceTree = "<group>"; };
+		8FC3B7B15CC433ED3D6E6B8A /* FlowerollIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowerollIntents.swift; sourceTree = "<group>"; };
+		9011117915ED333ADC471403 /* PendingSubmissionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingSubmissionStore.swift; sourceTree = "<group>"; };
+		921580526C4253EA0AF5872D /* ContactsQueryExecutorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactsQueryExecutorTests.swift; sourceTree = "<group>"; };
+		93F9997839C264593D3EB527 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		941718E6498AD9B68904E8EB /* GlobalInputRoutingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalInputRoutingModels.swift; sourceTree = "<group>"; };
+		96A52E7F56AC204579F0191C /* FlowerollRiveContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowerollRiveContractTests.swift; sourceTree = "<group>"; };
+		96A6B77D2FCCCC6C8BEEC1E9 /* ScheduleHubModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleHubModel.swift; sourceTree = "<group>"; };
+		97D2A4667CC0335FC1C75F1D /* Floweroll.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Floweroll.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		999D122769B697C25CB44FF9 /* ObservationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObservationTests.swift; sourceTree = "<group>"; };
+		9B34EC133DD3A1573522B391 /* TaskFileExportModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskFileExportModels.swift; sourceTree = "<group>"; };
+		9B9304FE96B96B3BFCF3932D /* ScheduleHubView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleHubView.swift; sourceTree = "<group>"; };
+		9D9C019CBF5F6E2D2BD1A78A /* DeviceActionJournal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceActionJournal.swift; sourceTree = "<group>"; };
+		9DBCFEFC4A73B87922A1FA02 /* AttachmentBackgroundUploadTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentBackgroundUploadTransport.swift; sourceTree = "<group>"; };
+		A100F1BB46A0C2D20DB49BA0 /* HomeInbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeInbox.swift; sourceTree = "<group>"; };
+		A11EE9B19231FF09DE85B3B8 /* FlowerollLiveActivityWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowerollLiveActivityWidget.swift; sourceTree = "<group>"; };
+		A25D60EE7E770A6A4240DF2B /* RiveRuntime */ = {isa = PBXFileReference; lastKnownFileType = folder; name = RiveRuntime; path = Packages/RiveRuntime; sourceTree = SOURCE_ROOT; };
+		A3E22E4A5DEFE5DE8E9EE75E /* TaskPresentationPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskPresentationPolicyTests.swift; sourceTree = "<group>"; };
+		A6998FEF5DF5FAE60F9EA3A5 /* RuntimeTimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeTimelineView.swift; sourceTree = "<group>"; };
+		A7EEA932A76EA34B165DA449 /* AlarmReadExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmReadExecutor.swift; sourceTree = "<group>"; };
+		A971F37074994CDB8C5CCF0B /* GlobalInputRoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalInputRoutingTests.swift; sourceTree = "<group>"; };
+		AC310CF71532A3B611B3CEF6 /* D17PhysicalAlarmHarnessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = D17PhysicalAlarmHarnessTests.swift; sourceTree = "<group>"; };
+		AC5084C735D5952A703BF4A7 /* HomeFocusedTaskStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeFocusedTaskStage.swift; sourceTree = "<group>"; };
+		AE8B20F4C10E3E62DFB050CC /* TaskListNativeScroller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskListNativeScroller.swift; sourceTree = "<group>"; };
+		B2C47926CE07DD27A4F13470 /* HomeScrollPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeScrollPolicyTests.swift; sourceTree = "<group>"; };
+		B3AF44F5F3D2BADC813147F6 /* PhotoLibrarySaveTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibrarySaveTests.swift; sourceTree = "<group>"; };
+		B476274BD82F3FFE03E77DF4 /* RuntimeCanonicalTaskDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeCanonicalTaskDetailView.swift; sourceTree = "<group>"; };
+		B62392301334C065477098A7 /* FlowerollTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = FlowerollTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B6393D33584C8CD869338BFC /* ToolSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolSettingsView.swift; sourceTree = "<group>"; };
+		B8F39A32B84FF51FE08235BF /* TerminalReviewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalReviewTests.swift; sourceTree = "<group>"; };
+		B90227A433842C609CB43D3C /* FlowerollActivitySession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowerollActivitySession.swift; sourceTree = "<group>"; };
+		BD0476C3747C62DF0B16BF21 /* ReminderCreateExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderCreateExecutor.swift; sourceTree = "<group>"; };
+		BFE78BFA7E8CD943E413D6A5 /* CalendarCreateExecutorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarCreateExecutorTests.swift; sourceTree = "<group>"; };
+		C0B83D792E96EEED48B72673 /* HomeCompletionAttentionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeCompletionAttentionPolicy.swift; sourceTree = "<group>"; };
+		C5115CF57011985C7093DA22 /* FlowerollApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowerollApp.swift; sourceTree = "<group>"; };
+		C59049C5CF482CFD51F35197 /* AlarmCancelExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmCancelExecutor.swift; sourceTree = "<group>"; };
+		C681E82602A7DADBA4E8FFBC /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		C839E2810DEA857A3689E6E8 /* AlarmManagement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmManagement.swift; sourceTree = "<group>"; };
+		CA6DF7337A7CB0E54CF0ECC7 /* TaskMaterial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskMaterial.swift; sourceTree = "<group>"; };
+		CAF574FD2A7E428F8B4E23C4 /* ThemeSystemTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeSystemTests.swift; sourceTree = "<group>"; };
+		CD58CEAAB508C3BFE81BCDED /* ShellPerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellPerformanceTests.swift; sourceTree = "<group>"; };
+		CED723AC13EEFE8458443EC2 /* TaskHistorySortTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskHistorySortTests.swift; sourceTree = "<group>"; };
+		CFF128403E9501197D0597CB /* TaskMaterialsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskMaterialsTests.swift; sourceTree = "<group>"; };
+		CFF49D50239922F8A4BD4E2C /* TaskListRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskListRows.swift; sourceTree = "<group>"; };
+		D0FF3E5DA05A412AE89BC76F /* TaskCancellationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskCancellationTests.swift; sourceTree = "<group>"; };
+		D17C48808D7A5D34DC0973ED /* HostTaskLiveSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostTaskLiveSession.swift; sourceTree = "<group>"; };
+		D295D73F2343545953DEEBA5 /* RuntimeArtifactViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeArtifactViews.swift; sourceTree = "<group>"; };
+		D4CE7EC9F2137DB273E6E651 /* DeviceRuntimeWorker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceRuntimeWorker.swift; sourceTree = "<group>"; };
+		D610DDDA106B90A750552F06 /* ObservationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObservationController.swift; sourceTree = "<group>"; };
+		D6179B693B39BF0B49B9C7A2 /* AlarmCreateExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmCreateExecutor.swift; sourceTree = "<group>"; };
+		D8F2A83E16D653E8D8C2B1C8 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		DBCB378A0C8BEF13703CED3E /* AlarmSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmSettingsView.swift; sourceTree = "<group>"; };
+		DE63FD25629EB2C9212F90B7 /* TaskMaterialManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskMaterialManifest.swift; sourceTree = "<group>"; };
+		E1C372B94B7BE8C24EB494D7 /* ObservationCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObservationCapture.swift; sourceTree = "<group>"; };
+		E3D1F0370A0164438D5B5713 /* DeveloperObservabilityViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperObservabilityViews.swift; sourceTree = "<group>"; };
+		E5793B7A6C8365859FCC6C53 /* AudioCaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCaptureService.swift; sourceTree = "<group>"; };
+		EDFB8F59E89B2BDA5681A97D /* SystemEntryOwnershipTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemEntryOwnershipTests.swift; sourceTree = "<group>"; };
+		EF7FDDDDDBD4D1C4DF7D11F2 /* ObservationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObservationView.swift; sourceTree = "<group>"; };
+		F01AADB1F727192C6D3AD178 /* HostModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostModels.swift; sourceTree = "<group>"; };
+		F0FDE1B0AAF3E4DE13C8682F /* InstalledIdentityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstalledIdentityTests.swift; sourceTree = "<group>"; };
+		F1ADAFA9E5AEEE9743974FCA /* ScheduleModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleModels.swift; sourceTree = "<group>"; };
+		F34374C6597FBFBED3ED04D7 /* ScheduleRemovalCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduleRemovalCoordinator.swift; sourceTree = "<group>"; };
+		F42615E77F5377BDB98AE997 /* AttachmentUploadTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentUploadTransport.swift; sourceTree = "<group>"; };
+		F5DD65EC37B55182923D112B /* TaskHistoryRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskHistoryRecoveryTests.swift; sourceTree = "<group>"; };
+		FB464908FFC3BAA9B31F84CA /* FlowerollHostClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowerollHostClient.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		58C56CF77B9AF1194EFF9F48 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				00A0083A80E171285E45EAEA /* RiveRuntime in Frameworks */,
+				6A73CA88BB4AC7729EA43943 /* AppIntents.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		01F29F0391735BD40698B5AB /* Theme */ = {
+			isa = PBXGroup;
+			children = (
+				7EE570DC1A5D3CB6AA0E271A /* FlowerollTheme.swift */,
+			);
+			path = Theme;
+			sourceTree = "<group>";
+		};
+		02BAEA768292BE97E11F92A6 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				452E618592EBC9A5A777991B /* TaskMaterialsPanel.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		0348B2BEE9BE0ED7805F88CC /* Policies */ = {
+			isa = PBXGroup;
+			children = (
+				38012641BC8256ACF664E959 /* CompletionAttentionPolicy.swift */,
+				941718E6498AD9B68904E8EB /* GlobalInputRoutingModels.swift */,
+				08E6F1085F3ADBFEF9BFF60A /* GlobalInputRoutingPolicy.swift */,
+				C0B83D792E96EEED48B72673 /* HomeCompletionAttentionPolicy.swift */,
+				0331EFF06FB2A803C227FB99 /* HomeScrollPolicy.swift */,
+				4BF5DEB29140E176C860A9E4 /* RuntimeCompletionAttentionOwner.swift */,
+				1574AC3AE81B86942EF06B14 /* TaskPresentationPolicy.swift */,
+				7391B56C29A6963F8FC247FA /* TerminalReviewPolicy.swift */,
+			);
+			path = Policies;
+			sourceTree = "<group>";
+		};
+		08BB9E39B1F936396F0BE3F1 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				066B71E721BD224CE1C01B7A /* Build.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		1A07B308B71652F583FB9B6F /* App */ = {
+			isa = PBXGroup;
+			children = (
+				E5793B7A6C8365859FCC6C53 /* AudioCaptureService.swift */,
+				C681E82602A7DADBA4E8FFBC /* ContentView.swift */,
+				B90227A433842C609CB43D3C /* FlowerollActivitySession.swift */,
+				C5115CF57011985C7093DA22 /* FlowerollApp.swift */,
+				8FC3B7B15CC433ED3D6E6B8A /* FlowerollIntents.swift */,
+				0D9F6123A25090AE300026D6 /* FlowerollMascotLabView.swift */,
+				6A08E73BB695F2F6BE572723 /* FlowerollPresentationView.swift */,
+				93F9997839C264593D3EB527 /* Info.plist */,
+				22FCC15B0AF4BC3C480423E9 /* Developer */,
+				8DF96B9B2C4F59B5DADF649D /* Home */,
+				F16F76FF0B846C7F9238DBE0 /* Observation */,
+				DC8D1C09B8A1EE0DC75A0364 /* Rive */,
+				EA15AD232CB056DA1AA7CCBC /* RuntimeClient */,
+				A9DDF4C4C4A8A2E6AE7D9D50 /* Schedule */,
+				73C9392813CE3916299EEDFD /* Settings */,
+				E9182614416861E09EA49918 /* Shell */,
+				9054AB1D26C54C346B7348E9 /* Tasks */,
+				01F29F0391735BD40698B5AB /* Theme */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		22FCC15B0AF4BC3C480423E9 /* Developer */ = {
+			isa = PBXGroup;
+			children = (
+				E3D1F0370A0164438D5B5713 /* DeveloperObservabilityViews.swift */,
+			);
+			path = Developer;
+			sourceTree = "<group>";
+		};
+		2582296283BF5AE037CD43C4 /* FlowerollTests */ = {
+			isa = PBXGroup;
+			children = (
+				89B0AF145C9DB03C3156407E /* AlarmExecutorsTests.swift */,
+				85D4432301828BC215D8933B /* BackgroundAttachmentUploadTests.swift */,
+				BFE78BFA7E8CD943E413D6A5 /* CalendarCreateExecutorTests.swift */,
+				921580526C4253EA0AF5872D /* ContactsQueryExecutorTests.swift */,
+				228DAFF690A8814433327346 /* D17AlarmHarnessCore.swift */,
+				AC310CF71532A3B611B3CEF6 /* D17PhysicalAlarmHarnessTests.swift */,
+				074CD107E57B7E15D074CC2D /* DeviceReconciliationTests.swift */,
+				96A52E7F56AC204579F0191C /* FlowerollRiveContractTests.swift */,
+				52D28BCEDF217557CDDC39D2 /* MaterialAttachmentStabilityTests.swift */,
+				1389E4F94F64BDD80B37EF85 /* NotifyUserExecutorTests.swift */,
+				999D122769B697C25CB44FF9 /* ObservationTests.swift */,
+				B3AF44F5F3D2BADC813147F6 /* PhotoLibrarySaveTests.swift */,
+				EDFB8F59E89B2BDA5681A97D /* SystemEntryOwnershipTests.swift */,
+				CFF128403E9501197D0597CB /* TaskMaterialsTests.swift */,
+				CAF574FD2A7E428F8B4E23C4 /* ThemeSystemTests.swift */,
+				4551025831A9DD779EAB2472 /* verify_theme_color_inventory.py */,
+				E00B3B349D0F2F030BF9A835 /* Interaction */,
+				29054769E68BC0A6CA18A0FB /* Support */,
+			);
+			path = FlowerollTests;
+			sourceTree = "<group>";
+		};
+		27FCE109E105355B96C49BDF /* Materials */ = {
+			isa = PBXGroup;
+			children = (
+				F1F8592A978A35F57295635B /* Attachments */,
+				DFCE1FA7E44055700266936D /* Export */,
+				39066EB2B007DA067748BE85 /* Models */,
+				02BAEA768292BE97E11F92A6 /* Views */,
+			);
+			path = Materials;
+			sourceTree = "<group>";
+		};
+		29054769E68BC0A6CA18A0FB /* Support */ = {
+			isa = PBXGroup;
+			children = (
+				873FDF56D9CC4F6512640BFE /* InteractionTestFixtures.swift */,
+				7AE4192BE24F80BEAF130936 /* ProductSourceFiles.swift */,
+			);
+			path = Support;
+			sourceTree = "<group>";
+		};
+		39066EB2B007DA067748BE85 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				CA6DF7337A7CB0E54CF0ECC7 /* TaskMaterial.swift */,
+				DE63FD25629EB2C9212F90B7 /* TaskMaterialManifest.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		529D4FF97663029575B616A0 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				2902742861027B3254E69A85 /* AppIntents.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		574E7ECD28D757B7F24A6ACB = {
+			isa = PBXGroup;
+			children = (
+				08BB9E39B1F936396F0BE3F1 /* Config */,
+				AA9E210064E410805E447D60 /* Floweroll */,
+				2582296283BF5AE037CD43C4 /* FlowerollTests */,
+				75506DE5B92BD563792A346F /* Packages */,
+				529D4FF97663029575B616A0 /* Frameworks */,
+				885BF15A75C1988A209E9DD0 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		5CECC5B989540B045CA26617 /* Presentation */ = {
+			isa = PBXGroup;
+			children = (
+				D295D73F2343545953DEEBA5 /* RuntimeArtifactViews.swift */,
+				B476274BD82F3FFE03E77DF4 /* RuntimeCanonicalTaskDetailView.swift */,
+				02D454C677A1C694796D9FA9 /* RuntimeEpisodeInteractionViews.swift */,
+				46C9E509D72BC9C7B0458B7A /* RuntimeStructuredResultView.swift */,
+				13EB30A9F92C5A60BBF9C8BE /* RuntimeTaskComponents.swift */,
+				70B5505101110C09536721B8 /* RuntimeTaskDetailModel.swift */,
+				8CD169FCEB8A688DB60D121B /* RuntimeTaskDetailView.swift */,
+				2A5EE531A088D80EF83A10CF /* RuntimeThreadDetailModel.swift */,
+				68737B929ED5F3693E6D42AD /* RuntimeThreadDetailView.swift */,
+				A6998FEF5DF5FAE60F9EA3A5 /* RuntimeTimelineView.swift */,
+				0C7DC2D9294F67542C376667 /* TerminalReviewVisibility.swift */,
+			);
+			path = Presentation;
+			sourceTree = "<group>";
+		};
+		73C9392813CE3916299EEDFD /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				DBCB378A0C8BEF13703CED3E /* AlarmSettingsView.swift */,
+				6521ACEC743A3ED8C574F990 /* PermissionSettingsView.swift */,
+				04124A842ED906B76ECE6A33 /* PrototypeDeveloperConsoleView.swift */,
+				D8F2A83E16D653E8D8C2B1C8 /* SettingsView.swift */,
+				B6393D33584C8CD869338BFC /* ToolSettingsView.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		75506DE5B92BD563792A346F /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				A25D60EE7E770A6A4240DF2B /* RiveRuntime */,
+			);
+			path = Packages;
+			sourceTree = "<group>";
+		};
+		885BF15A75C1988A209E9DD0 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				97D2A4667CC0335FC1C75F1D /* Floweroll.app */,
+				21D6747ECAD1D616AF3B5CB5 /* FlowerollLiveActivity.appex */,
+				B62392301334C065477098A7 /* FlowerollTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		8DF96B9B2C4F59B5DADF649D /* Home */ = {
+			isa = PBXGroup;
+			children = (
+				AC5084C735D5952A703BF4A7 /* HomeFocusedTaskStage.swift */,
+				A100F1BB46A0C2D20DB49BA0 /* HomeInbox.swift */,
+				8EE2869B6B3E2335B183B2C6 /* HomeStages.swift */,
+				38A96CD7834AAB0B9EF2DF06 /* HomeThreadEpisodeView.swift */,
+				622B07462065F5213EACEF87 /* HomeTimeline.swift */,
+				39C8802B04EC2600FBFDC563 /* HomeView.swift */,
+			);
+			path = Home;
+			sourceTree = "<group>";
+		};
+		9054AB1D26C54C346B7348E9 /* Tasks */ = {
+			isa = PBXGroup;
+			children = (
+				AE8B20F4C10E3E62DFB050CC /* TaskListNativeScroller.swift */,
+				CFF49D50239922F8A4BD4E2C /* TaskListRows.swift */,
+				211E8D28E4B3F7D520654101 /* TasksView.swift */,
+			);
+			path = Tasks;
+			sourceTree = "<group>";
+		};
+		A9DDF4C4C4A8A2E6AE7D9D50 /* Schedule */ = {
+			isa = PBXGroup;
+			children = (
+				73B7A81563CB812F33F1EFE9 /* ScheduleAggregation.swift */,
+				96A6B77D2FCCCC6C8BEEC1E9 /* ScheduleHubModel.swift */,
+				9B9304FE96B96B3BFCF3932D /* ScheduleHubView.swift */,
+				F1ADAFA9E5AEEE9743974FCA /* ScheduleModels.swift */,
+				F34374C6597FBFBED3ED04D7 /* ScheduleRemovalCoordinator.swift */,
+				7A6C88055E6BE9029BD3F5D3 /* ScheduleSources.swift */,
+			);
+			path = Schedule;
+			sourceTree = "<group>";
+		};
+		AA9E210064E410805E447D60 /* Floweroll */ = {
+			isa = PBXGroup;
+			children = (
+				1A07B308B71652F583FB9B6F /* App */,
+				B910F415B9B94BA4BE6236D5 /* LiveActivity */,
+				FFBF9048CE71E56BEFB26BF2 /* Shared */,
+			);
+			path = Floweroll;
+			sourceTree = "<group>";
+		};
+		B910F415B9B94BA4BE6236D5 /* LiveActivity */ = {
+			isa = PBXGroup;
+			children = (
+				15C4C60513ACC5939D49358E /* FlowerollLiveActivityBundle.swift */,
+				A11EE9B19231FF09DE85B3B8 /* FlowerollLiveActivityWidget.swift */,
+				505B30B155B35D440502D14C /* Info.plist */,
+			);
+			path = LiveActivity;
+			sourceTree = "<group>";
+		};
+		DC8D1C09B8A1EE0DC75A0364 /* Rive */ = {
+			isa = PBXGroup;
+			children = (
+				51BCDF98F35E12A5EF2CD9B3 /* floweroll-home.riv */,
+			);
+			path = Rive;
+			sourceTree = "<group>";
+		};
+		DFCE1FA7E44055700266936D /* Export */ = {
+			isa = PBXGroup;
+			children = (
+				227C889C7B504B94DB006CC9 /* TaskFileExportCoordinator.swift */,
+				9B34EC133DD3A1573522B391 /* TaskFileExportModels.swift */,
+				5A5187162FD78C971A644169 /* TaskFileExportStore.swift */,
+			);
+			path = Export;
+			sourceTree = "<group>";
+		};
+		E00B3B349D0F2F030BF9A835 /* Interaction */ = {
+			isa = PBXGroup;
+			children = (
+				0A9CD56309C797B94EAE71D3 /* CompletionAttentionTests.swift */,
+				3AF0E719F7FB713F7ED8AE35 /* DeveloperObservabilityTests.swift */,
+				A971F37074994CDB8C5CCF0B /* GlobalInputRoutingTests.swift */,
+				11900D67735F7C01E6053354 /* HomePresentationTests.swift */,
+				88162322A6E6709B080E0712 /* HomeRefreshTests.swift */,
+				B2C47926CE07DD27A4F13470 /* HomeScrollPolicyTests.swift */,
+				F0FDE1B0AAF3E4DE13C8682F /* InstalledIdentityTests.swift */,
+				822F6074D5AE0FC8650D47C0 /* NotificationRoutingTests.swift */,
+				8A093CA22A261314B57DCDC7 /* RuntimeInteractionPolicyTests.swift */,
+				CD58CEAAB508C3BFE81BCDED /* ShellPerformanceTests.swift */,
+				3A21996CBC8D20BC57F4A02B /* SystemPresentationTests.swift */,
+				D0FF3E5DA05A412AE89BC76F /* TaskCancellationTests.swift */,
+				F5DD65EC37B55182923D112B /* TaskHistoryRecoveryTests.swift */,
+				CED723AC13EEFE8458443EC2 /* TaskHistorySortTests.swift */,
+				767CF391A534E3AA99C436AD /* TaskInboxRecoveryTests.swift */,
+				A3E22E4A5DEFE5DE8E9EE75E /* TaskPresentationPolicyTests.swift */,
+				B8F39A32B84FF51FE08235BF /* TerminalReviewTests.swift */,
+			);
+			path = Interaction;
+			sourceTree = "<group>";
+		};
+		E9182614416861E09EA49918 /* Shell */ = {
+			isa = PBXGroup;
+			children = (
+				147894621B3164C54DBEAE7D /* AppShellCompletionAttentionCard.swift */,
+				1503B094B7656F8975DFB069 /* AppShellNavigation.swift */,
+			);
+			path = Shell;
+			sourceTree = "<group>";
+		};
+		EA15AD232CB056DA1AA7CCBC /* RuntimeClient */ = {
+			isa = PBXGroup;
+			children = (
+				C59049C5CF482CFD51F35197 /* AlarmCancelExecutor.swift */,
+				D6179B693B39BF0B49B9C7A2 /* AlarmCreateExecutor.swift */,
+				C839E2810DEA857A3689E6E8 /* AlarmManagement.swift */,
+				42B0A662D2A9F52CA96C14CA /* AlarmNativeExecution.swift */,
+				A7EEA932A76EA34B165DA449 /* AlarmReadExecutor.swift */,
+				9DBCFEFC4A73B87922A1FA02 /* AttachmentBackgroundUploadTransport.swift */,
+				F42615E77F5377BDB98AE997 /* AttachmentUploadTransport.swift */,
+				4456CFFBF9C95B56F01740D3 /* CalendarCreateExecutor.swift */,
+				7B3F30E355EC133D75A63715 /* CalendarReadExecutors.swift */,
+				36F5F7257BEBA15686FE8545 /* ContactsManagementExecutor.swift */,
+				0D155C6CBE47D5E151F70593 /* ContactsQueryExecutor.swift */,
+				9D9C019CBF5F6E2D2BD1A78A /* DeviceActionJournal.swift */,
+				58FFE4C1100AD4F6CBF2FA99 /* DeviceBackgroundExecutionController.swift */,
+				2BF66E853B9835F8C451598A /* DeviceExecutionCoordinator.swift */,
+				D4CE7EC9F2137DB273E6E651 /* DeviceRuntimeWorker.swift */,
+				FB464908FFC3BAA9B31F84CA /* FlowerollHostClient.swift */,
+				8504897F53BF4BAAC64C9D24 /* HostCredentialStore.swift */,
+				F01AADB1F727192C6D3AD178 /* HostModels.swift */,
+				D17C48808D7A5D34DC0973ED /* HostTaskLiveSession.swift */,
+				46E3C14C10AC0EE718532563 /* LocationCurrentExecutor.swift */,
+				6177B2D789FBF833D9098FF6 /* LocationPermissionModel.swift */,
+				62A7F791C4F34C9148377911 /* NativeCapabilityDiagnostics.swift */,
+				5BB90571A277381DC44D98FE /* NotifyUserExecutor.swift */,
+				9011117915ED333ADC471403 /* PendingSubmissionStore.swift */,
+				4CC73AC961E991EB8AE0EF98 /* PhotoLibrarySave.swift */,
+				BD0476C3747C62DF0B16BF21 /* ReminderCreateExecutor.swift */,
+				5D4C42D911BA71346859304B /* RuntimeConnectionSettingsView.swift */,
+				74B0BE960568CF5136C9A5C2 /* RuntimeTaskStore.swift */,
+				2E645D6AB1D82AA3829758A9 /* SystemEntryRuntimeCoordinator.swift */,
+				0D8A123F466ADDC7336BBB0E /* TaskAttachmentCapture.swift */,
+				27FCE109E105355B96C49BDF /* Materials */,
+				0348B2BEE9BE0ED7805F88CC /* Policies */,
+				5CECC5B989540B045CA26617 /* Presentation */,
+			);
+			path = RuntimeClient;
+			sourceTree = "<group>";
+		};
+		F16F76FF0B846C7F9238DBE0 /* Observation */ = {
+			isa = PBXGroup;
+			children = (
+				E1C372B94B7BE8C24EB494D7 /* ObservationCapture.swift */,
+				D610DDDA106B90A750552F06 /* ObservationController.swift */,
+				38E0B43F96C3FA57C3BCC024 /* ObservationModels.swift */,
+				EF7FDDDDDBD4D1C4DF7D11F2 /* ObservationView.swift */,
+			);
+			path = Observation;
+			sourceTree = "<group>";
+		};
+		F1F8592A978A35F57295635B /* Attachments */ = {
+			isa = PBXGroup;
+			children = (
+				50A5BCB878D39027CFF10C45 /* TaskAttachmentDraft.swift */,
+				890FACA1100D4BBA94E69FCB /* TaskAttachmentModels.swift */,
+				3E3125DC1234B2FF5AF94D41 /* TaskAttachmentViews.swift */,
+			);
+			path = Attachments;
+			sourceTree = "<group>";
+		};
+		FFBF9048CE71E56BEFB26BF2 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				574149C49818CA02FF5111AD /* Assets.xcassets */,
+				7029C26C818C7F3E8FB00FB2 /* FlowerollActivityAttributes.swift */,
+				840B281CD59E7720857656F3 /* FlowerollMascotView.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		6961FCA85D19CC2B4FFFBC72 /* FlowerollTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E25DFA8FB841BD6F5B150F9E /* Build configuration list for PBXNativeTarget "FlowerollTests" */;
+			buildPhases = (
+				FC19F944AB6B99D51D22C1DB /* Sources */,
+				2D9AA0DC9B2BBBACB3D1C22C /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				926C40473E02BE95B5362677 /* PBXTargetDependency */,
+			);
+			name = FlowerollTests;
+			packageProductDependencies = (
+			);
+			productName = FlowerollTests;
+			productReference = B62392301334C065477098A7 /* FlowerollTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		8C756F0CA6145E862F7878B9 /* FlowerollLiveActivity */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 18637BF7AB8E29CF46CC51FB /* Build configuration list for PBXNativeTarget "FlowerollLiveActivity" */;
+			buildPhases = (
+				CC492CC7493B1498D442A4F1 /* Sources */,
+				6A2896A9EB2E5B93521B8389 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = FlowerollLiveActivity;
+			packageProductDependencies = (
+			);
+			productName = FlowerollLiveActivity;
+			productReference = 21D6747ECAD1D616AF3B5CB5 /* FlowerollLiveActivity.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		F75FD45085558F651D4D2F63 /* Floweroll */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B56D8ABE9CC5A8B947DB57F3 /* Build configuration list for PBXNativeTarget "Floweroll" */;
+			buildPhases = (
+				199ED8C3BB23087E8B842CFC /* Sources */,
+				3EE6656CACE4253FCFB2A572 /* Resources */,
+				58C56CF77B9AF1194EFF9F48 /* Frameworks */,
+				F592F5708C5829C3CC1FB2BB /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				0445C41E405891808E547D1B /* PBXTargetDependency */,
+			);
+			name = Floweroll;
+			packageProductDependencies = (
+				6C3ACF17EE7DB5350AA2DA95 /* RiveRuntime */,
+			);
+			productName = Floweroll;
+			productReference = 97D2A4667CC0335FC1C75F1D /* Floweroll.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		F7E65D3697E7F014ACCE97BD /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					6961FCA85D19CC2B4FFFBC72 = {
+						ProvisioningStyle = Automatic;
+					};
+					8C756F0CA6145E862F7878B9 = {
+						ProvisioningStyle = Automatic;
+					};
+					F75FD45085558F651D4D2F63 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 83C1B8876F60E898EF978C5E /* Build configuration list for PBXProject "Floweroll" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 574E7ECD28D757B7F24A6ACB;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				DE1EA37B34443476ED548BA1 /* XCLocalSwiftPackageReference "Packages/RiveRuntime" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 885BF15A75C1988A209E9DD0 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				F75FD45085558F651D4D2F63 /* Floweroll */,
+				8C756F0CA6145E862F7878B9 /* FlowerollLiveActivity */,
+				6961FCA85D19CC2B4FFFBC72 /* FlowerollTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		2D9AA0DC9B2BBBACB3D1C22C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C7662BB3B81AFF154389C643 /* verify_theme_color_inventory.py in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		3EE6656CACE4253FCFB2A572 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F28C023387A9898352F6FD84 /* Assets.xcassets in Resources */,
+				58CD1F9830E3DC20E09ED16A /* floweroll-home.riv in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6A2896A9EB2E5B93521B8389 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				49E06D5FB0A67A705293470F /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		199ED8C3BB23087E8B842CFC /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				89A2519E28968F2673C54B62 /* AlarmCancelExecutor.swift in Sources */,
+				B9820FDC26BCDC597ED9C2A9 /* AlarmCreateExecutor.swift in Sources */,
+				38C000B1AA39835E99279D85 /* AlarmManagement.swift in Sources */,
+				5B21A4006D09000637E1A1FF /* AlarmNativeExecution.swift in Sources */,
+				B4E2B13E1377DF4A42910C30 /* AlarmReadExecutor.swift in Sources */,
+				1C63E5D22F871DF0B8562055 /* AlarmSettingsView.swift in Sources */,
+				C6FD22A1C35C1F53C6A41182 /* AppShellCompletionAttentionCard.swift in Sources */,
+				9299F8C019E769C28CD6E319 /* AppShellNavigation.swift in Sources */,
+				8DDFEBDFD3B1E8B48B880BCE /* AttachmentBackgroundUploadTransport.swift in Sources */,
+				D58E0C3835038D28914E5599 /* AttachmentUploadTransport.swift in Sources */,
+				DA6B9F86AA67FBB6B18BEF41 /* AudioCaptureService.swift in Sources */,
+				07C59952984CCB0CB5562CED /* CalendarCreateExecutor.swift in Sources */,
+				8F2D085CEF12EC9E652C514B /* CalendarReadExecutors.swift in Sources */,
+				1BF9B6251412E0A5852F634E /* CompletionAttentionPolicy.swift in Sources */,
+				BF2E0493BF0BBA071FCCB11E /* ContactsManagementExecutor.swift in Sources */,
+				5DD4FDBB0330347A2DEC1138 /* ContactsQueryExecutor.swift in Sources */,
+				0FDDE304B795D9B4ACCD92A1 /* ContentView.swift in Sources */,
+				BADE338B1AF3DDC5EDD942FC /* DeveloperObservabilityViews.swift in Sources */,
+				BD36757E77494F4B34B4A646 /* DeviceActionJournal.swift in Sources */,
+				4604AA42061068F1A2B0B2C2 /* DeviceBackgroundExecutionController.swift in Sources */,
+				CAA6260B3BB2BF8ED9493FE0 /* DeviceExecutionCoordinator.swift in Sources */,
+				B3B1161EF121FA46513B82CC /* DeviceRuntimeWorker.swift in Sources */,
+				AA771D6CE357DD4C0EF9FD9B /* FlowerollActivityAttributes.swift in Sources */,
+				B56930FD53692C95E4D32C7B /* FlowerollActivitySession.swift in Sources */,
+				AD57DB3C8C924D93CD15B723 /* FlowerollApp.swift in Sources */,
+				E3C5392748BB3B7B9E72717A /* FlowerollHostClient.swift in Sources */,
+				E58FE5C6F4E9CEB9F9878EF3 /* FlowerollIntents.swift in Sources */,
+				8E8907BB5F81FAE4F784035B /* FlowerollMascotLabView.swift in Sources */,
+				B4C5A033DEE98DE99ED39440 /* FlowerollMascotView.swift in Sources */,
+				9B852826178C719412CDDDBB /* FlowerollPresentationView.swift in Sources */,
+				0BE4D184F45D5F7AC5738522 /* FlowerollTheme.swift in Sources */,
+				B22002A25C5D44DB4942017A /* GlobalInputRoutingModels.swift in Sources */,
+				E8F497A3E4D4DCB4E82A51EF /* GlobalInputRoutingPolicy.swift in Sources */,
+				B31BA47BB4A6826F16653407 /* HomeCompletionAttentionPolicy.swift in Sources */,
+				FB798B44ABF93D1ED19E5BC7 /* HomeFocusedTaskStage.swift in Sources */,
+				3BE534A1FE96D51129885A3F /* HomeInbox.swift in Sources */,
+				A9372F4C6C42AF3EF4D7E697 /* HomeScrollPolicy.swift in Sources */,
+				6C0F87265C382E0FB2E70B57 /* HomeStages.swift in Sources */,
+				D1E209498EE4697A36E4D360 /* HomeThreadEpisodeView.swift in Sources */,
+				0660CB3DAC6C2EEF24F3A558 /* HomeTimeline.swift in Sources */,
+				F022D34163EFD1AE11E556BC /* HomeView.swift in Sources */,
+				3C23E183302F23E73ECEB310 /* HostCredentialStore.swift in Sources */,
+				46AB658034BF8A80A91059DC /* HostModels.swift in Sources */,
+				92AC20B0A1E5DEE035E1C3D6 /* HostTaskLiveSession.swift in Sources */,
+				18A13AB155B19D0AD211625B /* LocationCurrentExecutor.swift in Sources */,
+				B163115F92C56F0575174A09 /* LocationPermissionModel.swift in Sources */,
+				6174B689191926F8EA32287B /* NativeCapabilityDiagnostics.swift in Sources */,
+				550B2C487641F2609B5BAD50 /* NotifyUserExecutor.swift in Sources */,
+				960FBC1C417F259270E7A85F /* ObservationCapture.swift in Sources */,
+				450A984C92C9172834997B54 /* ObservationController.swift in Sources */,
+				D9CA9892709A013ADFEC781B /* ObservationModels.swift in Sources */,
+				E1B0E253E35CCE802C2EB2E6 /* ObservationView.swift in Sources */,
+				175677F5134B0968D8C64654 /* PendingSubmissionStore.swift in Sources */,
+				6256B64C201A8C074003ACEA /* PermissionSettingsView.swift in Sources */,
+				3293FF143B12C932A84BD0DD /* PhotoLibrarySave.swift in Sources */,
+				B85ADB9161A87C0751DFDB01 /* PrototypeDeveloperConsoleView.swift in Sources */,
+				716872DCCAB6E9ABD05AD590 /* ReminderCreateExecutor.swift in Sources */,
+				0B6F0C3B4E038B2E14009681 /* RuntimeArtifactViews.swift in Sources */,
+				506D2699CD8069A379F43D44 /* RuntimeCanonicalTaskDetailView.swift in Sources */,
+				DD7C97ACEA2F588CB90BA33E /* RuntimeCompletionAttentionOwner.swift in Sources */,
+				8A62EF2F02E31B47E66C97FE /* RuntimeConnectionSettingsView.swift in Sources */,
+				F8C9F05EE78A37602336B44C /* RuntimeEpisodeInteractionViews.swift in Sources */,
+				74FFA4826636570B15D9C719 /* RuntimeStructuredResultView.swift in Sources */,
+				B67B1002E327511B81948F38 /* RuntimeTaskComponents.swift in Sources */,
+				28D6CEF4A709E3C04AE6ABE3 /* RuntimeTaskDetailModel.swift in Sources */,
+				D62B32EBB8A5BCBB424AED16 /* RuntimeTaskDetailView.swift in Sources */,
+				9468373843953615364A3DFB /* RuntimeTaskStore.swift in Sources */,
+				667C3D4556A2F9431D0D1428 /* RuntimeThreadDetailModel.swift in Sources */,
+				3D904E7CD5AAFBDCB5905225 /* RuntimeThreadDetailView.swift in Sources */,
+				E17EC6B988CD0103D11D1146 /* RuntimeTimelineView.swift in Sources */,
+				82EE6738B70BB9A01DFC92F3 /* ScheduleAggregation.swift in Sources */,
+				2625165CDD184CC4120A533E /* ScheduleHubModel.swift in Sources */,
+				50AAD56B46332583EAFE12B1 /* ScheduleHubView.swift in Sources */,
+				A9E06E24AFA4918C8EC3A5C9 /* ScheduleModels.swift in Sources */,
+				F0AF885FC357B70CF5B87D5F /* ScheduleRemovalCoordinator.swift in Sources */,
+				FEDBAB5672881F4A62F687B5 /* ScheduleSources.swift in Sources */,
+				F88A562DBB848E5DDF61CA90 /* SettingsView.swift in Sources */,
+				47D9416F4DC57A82131D9F8E /* SystemEntryRuntimeCoordinator.swift in Sources */,
+				D953A4308939E53E71763847 /* TaskAttachmentCapture.swift in Sources */,
+				CB0DF917A546997580492B9E /* TaskAttachmentDraft.swift in Sources */,
+				CA739C361E065A131ED96E78 /* TaskAttachmentModels.swift in Sources */,
+				F176E91FBBE7821F8BB2F630 /* TaskAttachmentViews.swift in Sources */,
+				02789E9028DD6E0610AF2A99 /* TaskFileExportCoordinator.swift in Sources */,
+				2D456B63430DC82CAAA91331 /* TaskFileExportModels.swift in Sources */,
+				64FB919B7F88A01A8624569B /* TaskFileExportStore.swift in Sources */,
+				4AC51B7E6B67573BE424D2F1 /* TaskListNativeScroller.swift in Sources */,
+				89561BD9A18E8EEF16F0F406 /* TaskListRows.swift in Sources */,
+				6AE97FF13D25C0253ECD4915 /* TaskMaterial.swift in Sources */,
+				79A4C4CCC2BB1601726BE48D /* TaskMaterialManifest.swift in Sources */,
+				E63BF04E2AC0C532F9DC27F8 /* TaskMaterialsPanel.swift in Sources */,
+				4904C0261E5A9F1511EDBAA0 /* TaskPresentationPolicy.swift in Sources */,
+				D61D164EF875A415C7BE5FFB /* TasksView.swift in Sources */,
+				5FAE0C63A3C1CA020FCAC9B8 /* TerminalReviewPolicy.swift in Sources */,
+				0E0C85E63B5ADA3C3955C933 /* TerminalReviewVisibility.swift in Sources */,
+				22BB0BC80C561C6D79BEAC85 /* ToolSettingsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CC492CC7493B1498D442A4F1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A233EB8A1468078D9E0DF1D5 /* FlowerollActivityAttributes.swift in Sources */,
+				8FE27B91D2EBE7155D9CC6D7 /* FlowerollLiveActivityBundle.swift in Sources */,
+				94C0FA742CED4A6526507639 /* FlowerollLiveActivityWidget.swift in Sources */,
+				5B31688327338A68F68FCFBD /* FlowerollMascotView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FC19F944AB6B99D51D22C1DB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				741A846222DB83E5DA35BE89 /* AlarmExecutorsTests.swift in Sources */,
+				A03EE90035FACD1230C5F87A /* BackgroundAttachmentUploadTests.swift in Sources */,
+				61F799CA270F8AC727ED9313 /* CalendarCreateExecutorTests.swift in Sources */,
+				8DBEFDCE6844138F5428202F /* CompletionAttentionTests.swift in Sources */,
+				28C6F716810C0BEE733B8168 /* ContactsQueryExecutorTests.swift in Sources */,
+				958C15844A7AE3247A1471A7 /* D17AlarmHarnessCore.swift in Sources */,
+				9C6C71E0F56EB98ACA576013 /* D17PhysicalAlarmHarnessTests.swift in Sources */,
+				07F49864F421C6020C63BD4C /* DeveloperObservabilityTests.swift in Sources */,
+				09C18C467E51351F728CC496 /* DeviceReconciliationTests.swift in Sources */,
+				C9852610110A49766C9A1B84 /* FlowerollRiveContractTests.swift in Sources */,
+				61CBB0FAAB216F3EBB22033F /* GlobalInputRoutingTests.swift in Sources */,
+				F877B4A99D7BCB277F79FCEB /* HomePresentationTests.swift in Sources */,
+				5A19FAA55CC1C7F991FA4168 /* HomeRefreshTests.swift in Sources */,
+				D6DC2F0A5CBE14A5EF82EABB /* HomeScrollPolicyTests.swift in Sources */,
+				04508446DCBEF7CD3B734910 /* InstalledIdentityTests.swift in Sources */,
+				993E6D51FE4A81C02A2BB826 /* InteractionTestFixtures.swift in Sources */,
+				66F409B1056BF5389232546F /* MaterialAttachmentStabilityTests.swift in Sources */,
+				EACAD3E415E1EFCAF3857DE3 /* NotificationRoutingTests.swift in Sources */,
+				0704631F14EB75699708D350 /* NotifyUserExecutorTests.swift in Sources */,
+				9D28E82C6E9FB925328736D9 /* ObservationTests.swift in Sources */,
+				8732C0327D6405003A9CBB11 /* PhotoLibrarySaveTests.swift in Sources */,
+				78D140115D5BCCB74ED4C4E3 /* ProductSourceFiles.swift in Sources */,
+				EE333E309DBDE1A2ECF396B0 /* RuntimeInteractionPolicyTests.swift in Sources */,
+				2DA7F21EF672D799C609E42E /* ShellPerformanceTests.swift in Sources */,
+				589D5010825099FB1759D306 /* SystemEntryOwnershipTests.swift in Sources */,
+				6A77F611B5BF7EDD4DEC2BBE /* SystemPresentationTests.swift in Sources */,
+				0727C38F1B6A59DE387FED58 /* TaskCancellationTests.swift in Sources */,
+				4DAC0D6FC8D84A4A2AB038F4 /* TaskHistoryRecoveryTests.swift in Sources */,
+				3ADB53A2F60931747ECB919F /* TaskHistorySortTests.swift in Sources */,
+				4ED10FD2BDBEC76B73514856 /* TaskInboxRecoveryTests.swift in Sources */,
+				49F9E6C3070AAFFCCCB5FC35 /* TaskMaterialsTests.swift in Sources */,
+				B0263A5472E49C1DE0FD0468 /* TaskPresentationPolicyTests.swift in Sources */,
+				E5651399E5FFEA8FDDB3388A /* TerminalReviewTests.swift in Sources */,
+				4069C06F2E36D9C4A4F95B2D /* ThemeSystemTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		0445C41E405891808E547D1B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8C756F0CA6145E862F7878B9 /* FlowerollLiveActivity */;
+			targetProxy = 8392FF0AE77749E1C95097FD /* PBXContainerItemProxy */;
+		};
+		926C40473E02BE95B5362677 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F75FD45085558F651D4D2F63 /* Floweroll */;
+			targetProxy = B69A0BA2044BF361D9FA54A6 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		2336C55666D83F8ADDCA1F6E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				INFOPLIST_FILE = Floweroll/LiveActivity/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.maxenceyu.floweroll.liveactivity;
+				PRODUCT_NAME = FlowerollLiveActivity;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		7E5417C0BE3C85CAC004D417 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = Floweroll/App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.maxenceyu.floweroll;
+				PRODUCT_NAME = Floweroll;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		8F5F15FBF179D7D44D539F3E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = Floweroll/App/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.maxenceyu.floweroll;
+				PRODUCT_NAME = Floweroll;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		A32B4A56ED200E9B8D569799 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.maxenceyu.floweroll.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Floweroll.app/Floweroll";
+			};
+			name = Debug;
+		};
+		A6EFDDCE6E5732E04B009B29 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 066B71E721BD224CE1C01B7A /* Build.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 2;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 0.1.1;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		C71ED042AA107C5CCB9F0412 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				INFOPLIST_FILE = Floweroll/LiveActivity/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.maxenceyu.floweroll.liveactivity;
+				PRODUCT_NAME = FlowerollLiveActivity;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		D3D714343707E0F307F16DAD /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 066B71E721BD224CE1C01B7A /* Build.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 2;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 0.1.1;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		E99D4EC44B1D0B7133C63319 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.maxenceyu.floweroll.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Floweroll.app/Floweroll";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		18637BF7AB8E29CF46CC51FB /* Build configuration list for PBXNativeTarget "FlowerollLiveActivity" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C71ED042AA107C5CCB9F0412 /* Debug */,
+				2336C55666D83F8ADDCA1F6E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		83C1B8876F60E898EF978C5E /* Build configuration list for PBXProject "Floweroll" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A6EFDDCE6E5732E04B009B29 /* Debug */,
+				D3D714343707E0F307F16DAD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B56D8ABE9CC5A8B947DB57F3 /* Build configuration list for PBXNativeTarget "Floweroll" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7E5417C0BE3C85CAC004D417 /* Debug */,
+				8F5F15FBF179D7D44D539F3E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E25DFA8FB841BD6F5B150F9E /* Build configuration list for PBXNativeTarget "FlowerollTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A32B4A56ED200E9B8D569799 /* Debug */,
+				E99D4EC44B1D0B7133C63319 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		DE1EA37B34443476ED548BA1 /* XCLocalSwiftPackageReference "Packages/RiveRuntime" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/RiveRuntime;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		6C3ACF17EE7DB5350AA2DA95 /* RiveRuntime */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = RiveRuntime;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = F7E65D3697E7F014ACCE97BD /* Project object */;
+}

@@ -1,0 +1,246 @@
+{
+  "version": "2026-09-11",
+  "threshold": 8,
+  "states": {
+    "idle": {
+      "source": "assets/floweroll/states/idle.png",
+      "main": "main.png",
+      "accessories": [],
+      "components": [
+        {
+          "area": 374336,
+          "bbox": [
+            115,
+            230,
+            985,
+            820
+          ]
+        }
+      ],
+      "recomposition": "pixel-exact"
+    },
+    "listening": {
+      "source": "assets/floweroll/states/listening.png",
+      "main": "main.png",
+      "accessories": [
+        "signal"
+      ],
+      "components": [
+        {
+          "area": 378534,
+          "bbox": [
+            103,
+            234,
+            978,
+            811
+          ]
+        },
+        {
+          "area": 2302,
+          "bbox": [
+            109,
+            298,
+            167,
+            375
+          ]
+        },
+        {
+          "area": 2147,
+          "bbox": [
+            57,
+            366,
+            128,
+            421
+          ]
+        }
+      ],
+      "recomposition": "pixel-exact"
+    },
+    "thinking": {
+      "source": "assets/floweroll/states/thinking.png",
+      "main": "main.png",
+      "accessories": [
+        "question",
+        "tailAccent"
+      ],
+      "components": [
+        {
+          "area": 453485,
+          "bbox": [
+            63,
+            225,
+            980,
+            907
+          ]
+        },
+        {
+          "area": 6782,
+          "bbox": [
+            723,
+            129,
+            832,
+            252
+          ]
+        },
+        {
+          "area": 1925,
+          "bbox": [
+            824,
+            213,
+            887,
+            273
+          ]
+        },
+        {
+          "area": 1536,
+          "bbox": [
+            946,
+            415,
+            996,
+            491
+          ]
+        },
+        {
+          "area": 1514,
+          "bbox": [
+            834,
+            285,
+            896,
+            318
+          ]
+        },
+        {
+          "area": 1133,
+          "bbox": [
+            742,
+            264,
+            780,
+            302
+          ]
+        }
+      ],
+      "recomposition": "pixel-exact"
+    },
+    "working": {
+      "source": "assets/floweroll/states/working.png",
+      "main": "main.png",
+      "accessories": [
+        "accent"
+      ],
+      "components": [
+        {
+          "area": 368293,
+          "bbox": [
+            115,
+            227,
+            958,
+            798
+          ]
+        },
+        {
+          "area": 1883,
+          "bbox": [
+            930,
+            355,
+            986,
+            442
+          ]
+        }
+      ],
+      "recomposition": "pixel-exact"
+    },
+    "waiting": {
+      "source": "assets/floweroll/states/waiting.png",
+      "main": "main.png",
+      "accessories": [
+        "bubble"
+      ],
+      "components": [
+        {
+          "area": 315858,
+          "bbox": [
+            168,
+            289,
+            972,
+            815
+          ]
+        },
+        {
+          "area": 29412,
+          "bbox": [
+            74,
+            209,
+            290,
+            389
+          ]
+        }
+      ],
+      "recomposition": "pixel-exact"
+    },
+    "done": {
+      "source": "assets/floweroll/states/done-cheer.png",
+      "main": "main.png",
+      "accessories": [
+        "sparklesLeft",
+        "sparklesRight"
+      ],
+      "components": [
+        {
+          "area": 373288,
+          "bbox": [
+            126,
+            219,
+            966,
+            831
+          ]
+        },
+        {
+          "area": 4551,
+          "bbox": [
+            77,
+            258,
+            180,
+            375
+          ]
+        },
+        {
+          "area": 2380,
+          "bbox": [
+            735,
+            232,
+            786,
+            315
+          ]
+        },
+        {
+          "area": 2271,
+          "bbox": [
+            769,
+            280,
+            832,
+            353
+          ]
+        },
+        {
+          "area": 2212,
+          "bbox": [
+            56,
+            386,
+            124,
+            465
+          ]
+        },
+        {
+          "area": 1680,
+          "bbox": [
+            944,
+            371,
+            991,
+            452
+          ]
+        }
+      ],
+      "recomposition": "pixel-exact"
+    }
+  }
+}

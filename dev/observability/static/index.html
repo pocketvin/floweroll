@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>小卷 · 开发观察台</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="mark">小卷</span><div><strong>开发观察台</strong><span class="sub">看见每一步，而不是猜测</span></div></div>
+  <div class="top-actions"><span id="mode" class="badge">连接中</span><a id="langfuse" target="_blank" rel="noreferrer">Langfuse 详细视图 ↗</a><button id="refresh">刷新</button></div>
+</header>
+<div class="layout">
+  <aside>
+    <div class="surface-switch" role="tablist" aria-label="观察台数据源">
+      <button id="surface-tasks" type="button" role="tab" aria-selected="true" class="selected">任务</button>
+      <button id="surface-observations" type="button" role="tab" aria-selected="false">观察</button>
+    </div>
+    <div class="aside-title"><h2 id="list-title">最近任务</h2><span id="list-count"></span></div>
+    <label class="sr-only" for="search">搜索</label>
+    <input id="search" type="search" placeholder="搜索任务或 ID">
+    <div id="task-list" aria-label="任务列表"></div>
+    <div id="observation-list" aria-label="观察记录列表" hidden></div>
+    <p id="list-note" class="small">来自真实 Host 数据库 · 只读<br>每 6 秒刷新，不执行任务或调用模型</p>
+  </aside>
+  <main>
+    <div id="notice" role="status"></div>
+    <section id="welcome" class="panel">
+      <h1 id="welcome-title">先选一条任务</h1>
+      <p id="welcome-copy">查看小卷实际给模型的 Prompt、上下文、工具，以及模型返回后到底发生了什么。</p>
+      <p id="welcome-note" class="muted">旧任务没有记录的请求会明确显示「未采集」，不会用当前模板倒推。</p>
+    </section>
+
+    <div id="detail" hidden>
+      <section class="hero">
+        <div class="eyebrow"><span id="task-status" class="badge"></span><span id="task-id"></span><a id="trace-link" target="_blank" rel="noreferrer">打开完整 Trace ↗</a></div>
+        <h1 id="goal"></h1><p id="task-note" class="muted"></p><div id="metrics" class="metrics"></div>
+      </section>
+      <div class="workspace">
+        <section class="panel flow"><div class="section-head"><h2>执行过程</h2><span class="muted">点击 Planner 查看请求</span></div><div id="events"></div></section>
+        <section class="panel inspector"><div class="section-head"><h2 id="call-title">请求检查器</h2></div><p id="call-note" class="muted">选择左侧任意一次 Planner 调用。这里展示的是实际输入与结果，不是模型私有思维链。</p><nav id="tabs" aria-label="请求内容"></nav><div id="call-meta" class="small"></div><pre id="payload" tabindex="0">暂无选中调用</pre></section>
+      </div>
+      <section class="panel evidence"><div class="section-head"><h2>异常与恢复证据</h2><span class="muted">事实不等于自动根因结论</span></div><div id="evidence"></div><p class="small">Prompt 质量、上下文完整性、事实准确性和真机 UI 仍需对应测试。没有证据时不标「通过」。</p></section>
+    </div>
+
+    <div id="observation-detail" hidden>
+      <section class="hero">
+        <div class="eyebrow"><span id="observation-status" class="badge"></span><span id="observation-id"></span><span id="observation-preset" class="muted"></span></div>
+        <h1 id="observation-title"></h1>
+        <p id="observation-note" class="muted"></p>
+        <div id="observation-metrics" class="metrics"></div>
+      </section>
+      <div class="workspace">
+        <section class="panel flow">
+          <div class="section-head"><h2>观察时间线</h2><span class="muted">只读 durable evidence · 最近 180 条</span></div>
+          <div id="observation-timeline"></div>
+        </section>
+        <section class="panel inspector observation-inspector">
+          <div class="section-head"><h2>来源与整理状态</h2><span class="muted">不读取实时麦克风电平</span></div>
+          <div id="observation-analysis" class="analysis-grid"></div>
+          <h3>来源证据</h3>
+          <div id="observation-sources" class="source-grid"></div>
+        </section>
+      </div>
+      <section class="panel observation-notes-panel">
+        <div class="section-head"><h2>Checkpoint / Final Summary</h2><span class="muted">仅 local_full 展示正文</span></div>
+        <div id="observation-notes"></div>
+      </section>
+      <section id="observation-questions-panel" class="panel observation-notes-panel" hidden>
+        <div class="section-head"><h2>基于记录的问答</h2><span class="muted">问题和答案同样来自 durable Observation DB</span></div>
+        <div id="observation-questions"></div>
+      </section>
+    </div>
+
+    <footer><span id="export-status">正在检查导出状态</span><span>完整数据只留本机 · 密钥脱敏 · 不修改 Task/Observation 状态</span><a id="prompts-link" target="_blank" rel="noreferrer">Prompt 版本与比较 ↗</a></footer>
+  </main>
+</div>
+</body>
+</html>

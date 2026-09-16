@@ -1,0 +1,411 @@
+{
+  "schema_version": 2,
+  "updated": "2026-09-11",
+  "product_name": "小卷",
+  "identity": {
+    "primary_anchor": "identity/app-icon-approved.png",
+    "runtime_app_icon": "identity/app-icon-1024.png",
+    "source_sha256": "e0e0579f7bc721cdbf16725715852d89456a21d761d50ebcfd695e7793e5c00c",
+    "runtime_sha256": "81f8254fe73bf3beeb3f16476a84298f52707a8c53816b30abfe15296b76a0f4",
+    "rules": [
+      "white rounded blob cat-head; no separate torso/legs",
+      "single centered forehead curl",
+      "thick rounded black outline",
+      "small pink inner ears and blush",
+      "large curved cat tail",
+      "at most two round paws total; action paws replace resting paws"
+    ],
+    "source_download": "ChatGPT Image 2026年9月11日 02_02_42.png",
+    "runtime_processing": "crop 40 px from each edge to remove baked outer mockup white frame, then resize to 1024x1024; no character redraw"
+  },
+  "canonical_assets": [
+    {
+      "id": "done-cheer",
+      "category": "state",
+      "path": "states/done-cheer.png",
+      "status": "canonical",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha": {
+        "transparent_lt16": 0.632,
+        "partial_16_249": 0.0086,
+        "opaque_ge250": 0.3594
+      },
+      "sha256": "e2350a41f84eebea4008edb5a5e599ba129df1f0337e4658459aa1a049c6f9cd",
+      "intended_use": "task completion short reaction",
+      "max_paws": 2
+    },
+    {
+      "id": "idle",
+      "category": "state",
+      "path": "states/idle.png",
+      "status": "canonical",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha": {
+        "transparent_lt16": 0.6431,
+        "partial_16_249": 0.0032,
+        "opaque_ge250": 0.3536
+      },
+      "sha256": "219dfe3ceb36cef6a8b3565f48af8bb39958166f990dd93c2f463b0f1fd18e67",
+      "intended_use": "empty state / quiet standby only",
+      "max_paws": 2
+    },
+    {
+      "id": "listening",
+      "category": "state",
+      "path": "states/listening.png",
+      "status": "canonical",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha": {
+        "transparent_lt16": 0.6349,
+        "partial_16_249": 0.0037,
+        "opaque_ge250": 0.3613
+      },
+      "sha256": "c56a6baf5a687b3cbd78bde7fef2e71ee02ec42cb5fe9fe10aa3997735a11349",
+      "intended_use": "voice capture / listening state",
+      "max_paws": 2
+    },
+    {
+      "id": "thinking",
+      "category": "state",
+      "path": "states/thinking.png",
+      "status": "canonical",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha": {
+        "transparent_lt16": 0.5556,
+        "partial_16_249": 0.0086,
+        "opaque_ge250": 0.4358
+      },
+      "sha256": "337b7625ff2f6035d19e48a7d739544b164845124a5037b83ae29fc43082b948",
+      "intended_use": "planning/reasoning state",
+      "max_paws": 2
+    },
+    {
+      "id": "waiting",
+      "category": "state",
+      "path": "states/waiting.png",
+      "status": "canonical",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha": {
+        "transparent_lt16": 0.6709,
+        "partial_16_249": 0.0036,
+        "opaque_ge250": 0.3256
+      },
+      "sha256": "412e224f77dbb0b6371b7c8a55060cb50b0e0f07fd778735b0f1660cb0ff4406",
+      "intended_use": "waiting for user/external response",
+      "max_paws": 2
+    },
+    {
+      "id": "working",
+      "category": "state",
+      "path": "states/working.png",
+      "status": "canonical",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha": {
+        "transparent_lt16": 0.6472,
+        "partial_16_249": 0.0032,
+        "opaque_ge250": 0.3497
+      },
+      "sha256": "1164a180444f5862d608b8cd291e2bbbc0cc30af06eff01dee4389cd14f1a79b",
+      "intended_use": "active execution state",
+      "max_paws": 2
+    },
+    {
+      "id": "alarm",
+      "category": "scene",
+      "path": "scenes/alarm.png",
+      "status": "canonical",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha": {
+        "transparent_lt16": 0.6016,
+        "partial_16_249": 0.0074,
+        "opaque_ge250": 0.391
+      },
+      "sha256": "57bc68262885ac70d31661c9299f9ad81d576cbe33cde13353956b04ba5203e2",
+      "intended_use": "reminder/timer/schedule result",
+      "max_paws": 2
+    },
+    {
+      "id": "calendar",
+      "category": "scene",
+      "path": "scenes/calendar.png",
+      "status": "canonical",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha": {
+        "transparent_lt16": 0.615,
+        "partial_16_249": 0.0071,
+        "opaque_ge250": 0.3779
+      },
+      "sha256": "97bd4e7d7c9efe9f1ae1eb21b6dc4891955646fe39c7a64f4d444e020730f75a",
+      "intended_use": "calendar/event result",
+      "max_paws": 2
+    },
+    {
+      "id": "camera",
+      "category": "scene",
+      "path": "scenes/camera.png",
+      "status": "canonical",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha": {
+        "transparent_lt16": 0.6071,
+        "partial_16_249": 0.0079,
+        "opaque_ge250": 0.385
+      },
+      "sha256": "8a0d78ad7f17e11f370946494b41a1a601e72fc715011ca70cf044ebcca72339",
+      "intended_use": "real capture/photo artifact",
+      "max_paws": 2
+    },
+    {
+      "id": "checklist",
+      "category": "scene",
+      "path": "scenes/checklist.png",
+      "status": "canonical",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha": {
+        "transparent_lt16": 0.6079,
+        "partial_16_249": 0.0075,
+        "opaque_ge250": 0.3846
+      },
+      "sha256": "562023a4af8f9b2b1fd7d4145a951c9f01f4d1c0ef0c724d3046b46c66673550",
+      "intended_use": "plan/checklist artifact",
+      "max_paws": 2
+    },
+    {
+      "id": "data",
+      "category": "scene",
+      "path": "scenes/data.png",
+      "status": "canonical",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha": {
+        "transparent_lt16": 0.5725,
+        "partial_16_249": 0.0081,
+        "opaque_ge250": 0.4193
+      },
+      "sha256": "8d1538cab994105ac96e1e0cdd494de1efd353cb2d9f3087fe042eaabb72b42f",
+      "intended_use": "analysis/report result",
+      "max_paws": 2
+    },
+    {
+      "id": "email",
+      "category": "scene",
+      "path": "scenes/email.png",
+      "status": "canonical",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha": {
+        "transparent_lt16": 0.6543,
+        "partial_16_249": 0.007,
+        "opaque_ge250": 0.3387
+      },
+      "sha256": "cafa7808a2dbf4fcc1c0a124e9bc20851db4ad1eca4e2b953a5b94020d0baa38",
+      "intended_use": "email draft/result header",
+      "max_paws": 2
+    },
+    {
+      "id": "files",
+      "category": "scene",
+      "path": "scenes/files.png",
+      "status": "canonical",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha": {
+        "transparent_lt16": 0.5985,
+        "partial_16_249": 0.0075,
+        "opaque_ge250": 0.394
+      },
+      "sha256": "19c0d76eb557486c04d46084f347e33c6298399909756fa0a2067581c02ba957",
+      "intended_use": "file organization/export result",
+      "max_paws": 2
+    },
+    {
+      "id": "food-delivery",
+      "category": "scene",
+      "path": "scenes/food-delivery.png",
+      "status": "canonical",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha": {
+        "transparent_lt16": 0.5665,
+        "partial_16_249": 0.0081,
+        "opaque_ge250": 0.4255
+      },
+      "sha256": "70dd111b22a0819c36f22cb9b3dea9992d5e58d2bb2d54799dc9dd7118565167",
+      "intended_use": "food order result/handoff card",
+      "max_paws": 2
+    },
+    {
+      "id": "map",
+      "category": "scene",
+      "path": "scenes/map.png",
+      "status": "canonical",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha": {
+        "transparent_lt16": 0.5794,
+        "partial_16_249": 0.0071,
+        "opaque_ge250": 0.4136
+      },
+      "sha256": "59d6eb79c153c0b9738e459e3413dd2cf5cfc243517205d4e644fd5a3ad3af48",
+      "intended_use": "route/itinerary/map result",
+      "max_paws": 2
+    },
+    {
+      "id": "notes",
+      "category": "scene",
+      "path": "scenes/notes.png",
+      "status": "canonical",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha": {
+        "transparent_lt16": 0.6365,
+        "partial_16_249": 0.0036,
+        "opaque_ge250": 0.3599
+      },
+      "sha256": "969693d3545a01d8780728e2021cc4010c0bdfa0e4169ff817bdf76ba0f0a962",
+      "intended_use": "note/memo artifact header",
+      "max_paws": 2
+    },
+    {
+      "id": "phone",
+      "category": "scene",
+      "path": "scenes/phone.png",
+      "status": "canonical",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha": {
+        "transparent_lt16": 0.6242,
+        "partial_16_249": 0.0075,
+        "opaque_ge250": 0.3682
+      },
+      "sha256": "370b904b7f787a486a4f25423971bcfd4850cdf943aabad4448c94528393c180",
+      "intended_use": "real call/communication result",
+      "max_paws": 2
+    },
+    {
+      "id": "ride-hailing",
+      "category": "scene",
+      "path": "scenes/ride-hailing.png",
+      "status": "canonical",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha": {
+        "transparent_lt16": 0.6072,
+        "partial_16_249": 0.0085,
+        "opaque_ge250": 0.3844
+      },
+      "sha256": "bab4292f0dea4941319065254e5f2e0620bcbbf5a67c7da236ce65b1445f598b",
+      "intended_use": "ride result/handoff card",
+      "max_paws": 2
+    },
+    {
+      "id": "search",
+      "category": "scene",
+      "path": "scenes/search.png",
+      "status": "canonical",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha": {
+        "transparent_lt16": 0.5943,
+        "partial_16_249": 0.0073,
+        "opaque_ge250": 0.3984
+      },
+      "sha256": "497bd64156b0c2a2bb1992e9d0cf46b6016767c689c244e8718be98815ad8ed6",
+      "intended_use": "research/search semantic stage or result",
+      "max_paws": 2
+    },
+    {
+      "id": "translate",
+      "category": "scene",
+      "path": "scenes/translate.png",
+      "status": "canonical",
+      "size": [
+        1024,
+        1024
+      ],
+      "mode": "RGBA",
+      "alpha": {
+        "transparent_lt16": 0.6246,
+        "partial_16_249": 0.0086,
+        "opaque_ge250": 0.3668
+      },
+      "sha256": "e4bb303827cd74b207378b5b3e2d143091261040d0204d74dbc60c20227a1e66",
+      "intended_use": "translation result",
+      "max_paws": 2
+    }
+  ],
+  "reference_assets": [
+    {
+      "path": "reference/expression-sheet-approved.png",
+      "status": "reference-only",
+      "sha256": "eb1502408f81d977dca1dea38962e302e89b44a719848ee911ceadce8f3e6e5b"
+    }
+  ],
+  "selection_note": "Only user-approved state/scene assets are canonical. Rejected/duplicate downloads and older alternates are reference/archive only. UI must not read Downloads or work staging directly."
+}

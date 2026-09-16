@@ -1,0 +1,52 @@
+name: Source and Host
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: source-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  repository:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - run: python scripts/verify_repository.py
+      - run: python -m unittest discover -s scripts/tests -p 'test_*.py' -v
+      - run: python scripts/fetch_gitleaks.py
+      - run: python scripts/verify_secrets.py --mode git
+  host:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --require-hashes -r host/requirements.lock -r dev/requirements.lock
+      - run: python scripts/verify_floweroll_ip.py
+      - run: scripts/verify_host_regression.sh full
+        env:
+          PYTHON_BIN: python3
+  observability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --require-hashes -r dev/observability/requirements.lock
+      - run: python -m unittest dev.observability.test_console dev.observability.test_observation_projection dev.observability.test_observability dev.observability.test_namespace -v

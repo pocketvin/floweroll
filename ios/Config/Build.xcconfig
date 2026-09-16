@@ -1,0 +1,3 @@
+// Shared build configuration; the optional local file never enters Git.
+CODE_SIGN_STYLE = Automatic
+#include? "Local.xcconfig"
