@@ -6,30 +6,9 @@
 
 ## 核心架构
 
-```mermaid
-flowchart TB
-  USER["用户"] --> IOS["iPhone<br/>Home · Task · Inbox"]
-  IOS --> RT["Host Runtime<br/>FastAPI · Task · Action · Attempt"]
-  RT --> LG["LangGraph Planner<br/>Context · Memory · Recovery"]
-  LG --> EXEC["Capability & Execution<br/>Registry · Policy · Retry"]
-  EXEC --> VERIFY["Verification / Readback<br/>Timeline · Result → iPhone"]
-
-  RT -. "durable truth" .-> DB[("SQLite")]
-  MEM[("Mem0")] -. "relevant memory" .-> LG
-  LG <-->|"model call"| MODEL["LLM / Vision"]
-  EXEC --> NATIVE["iPhone Native<br/>Calendar · Alarm · Contacts"]
-  EXEC --> TOOLS["Providers & Host Tools<br/>API · MCP · CLI · PDF · OCR"]
-
-  classDef phone fill:#fff1f5,stroke:#d889a6,color:#5b2638,stroke-width:1.3px;
-  classDef core fill:#f4f7ff,stroke:#7f90c7,color:#26345f,stroke-width:1.3px;
-  classDef data fill:#eef9f3,stroke:#69a68b,color:#214b3a,stroke-width:1.3px;
-  classDef external fill:#f8f5ff,stroke:#9987c2,color:#433768,stroke-width:1.3px;
-
-  class USER,IOS,NATIVE phone;
-  class RT,LG,EXEC,VERIFY core;
-  class DB,MEM data;
-  class MODEL,TOOLS external;
-```
+<p align="center">
+  <img src="docs/assets/floweroll-architecture.svg" alt="Floweroll 核心架构：iPhone → Host Runtime → LangGraph Planner → Capability & Execution → Verification / Readback，并展示 SQLite、Mem0、模型、iOS 原生能力、外部 Provider、材料工具以及 retry / recovery / re-plan 闭环。" width="100%">
+</p>
 
 **主任务链路如上：LangGraph 负责 Planner 内部决策图；Floweroll Runtime 负责 Task / Action / Attempt、授权、verification、recovery 与 SQLite durable truth。Observation Mode 是独立 lifecycle，单独放在下节，不和 Task 状态机画在一张图里。**
 

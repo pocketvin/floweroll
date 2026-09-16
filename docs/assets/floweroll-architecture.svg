@@ -1,0 +1,156 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="820" viewBox="0 0 1440 820" role="img" aria-labelledby="title desc">
+<title id="title">Floweroll system architecture</title>
+<desc id="desc">Floweroll task execution architecture with an iPhone entry, durable Host Runtime, LangGraph Planner, capability execution, verification and recovery loop, plus durable state, memory, models, native iOS capabilities, provider tools, and a separate Observation lifecycle.</desc>
+<style>
+  :root {
+    --paper:#fbfcfe; --card:#ffffff; --ink:#192235; --muted:#667085; --soft:#98a2b3; --rule:#d9e1ec;
+    --phone:#d85b82; --phone-bg:#fff1f5; --core:#6684cf; --core-bg:#f4f7ff; --planner:#7668df; --planner-bg:#f4f1ff;
+    --data:#4f9b7d; --data-bg:#eef9f3; --external:#7868c8; --external-bg:#f7f4ff; --loop:#e85e79; --result:#4b82c3;
+    --obs:#7c879b; --obs-bg:#f4f6f9; --shadow:#20304b10;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper:#0d1117; --card:#161b22; --ink:#e6edf3; --muted:#9da7b3; --soft:#7d8590; --rule:#30363d;
+      --phone:#f08aa6; --phone-bg:#291a22; --core:#8da5ee; --core-bg:#172033; --planner:#a89cf4; --planner-bg:#201d39;
+      --data:#75b89d; --data-bg:#15251f; --external:#a89be8; --external-bg:#211d32; --loop:#f07591; --result:#76a7df;
+      --obs:#a0aabd; --obs-bg:#171c24; --shadow:#00000000;
+    }
+  }
+  text { font-family:'PingFang SC','Microsoft YaHei','Noto Sans CJK SC',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; fill:var(--ink); }
+  .mono { font-family:'SFMono-Regular','JetBrains Mono','Noto Sans Mono CJK SC',ui-monospace,monospace; }
+  .eyebrow { font-size:11px; font-weight:700; letter-spacing:.14em; fill:var(--muted); }
+  .title { font-size:20px; font-weight:700; }
+  .subtitle { font-size:12px; fill:var(--muted); }
+  .small { font-size:11px; fill:var(--muted); }
+  .tiny { font-size:10px; fill:var(--soft); }
+  .card { fill:var(--card); stroke:var(--rule); stroke-width:1.2; vector-effect:non-scaling-stroke; }
+  .main { fill:var(--core-bg); stroke:var(--core); }
+  .planner { fill:var(--planner-bg); stroke:var(--planner); }
+  .phone { fill:var(--phone-bg); stroke:var(--phone); }
+  .data { fill:var(--data-bg); stroke:var(--data); }
+  .external { fill:var(--external-bg); stroke:var(--external); }
+  .obs { fill:var(--obs-bg); stroke:var(--rule); }
+  .chip { fill:var(--card); stroke:var(--rule); stroke-width:1; }
+  .flow { fill:none; stroke:var(--core); stroke-width:1.6; vector-effect:non-scaling-stroke; }
+  .soft-flow { fill:none; stroke:var(--soft); stroke-width:1.15; stroke-dasharray:5 5; vector-effect:non-scaling-stroke; }
+  .model-flow { fill:none; stroke:var(--planner); stroke-width:1.35; vector-effect:non-scaling-stroke; }
+  .recovery { fill:none; stroke:var(--loop); stroke-width:2.2; vector-effect:non-scaling-stroke; }
+  .result-flow { fill:none; stroke:var(--result); stroke-width:1.9; vector-effect:non-scaling-stroke; }
+  .icon { fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; vector-effect:non-scaling-stroke; }
+  .shadow { filter:url(#shadow); }
+</style>
+<defs>
+  <filter id="shadow" x="-10%" y="-20%" width="120%" height="150%"><feDropShadow dx="0" dy="7" stdDeviation="10" flood-color="var(--shadow)"/></filter>
+  <marker id="arrow-core" markerWidth="9" markerHeight="9" refX="2" refY="4.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L9,4.5 L0,9 L2.3,4.5 z" fill="var(--core)"/></marker>
+  <marker id="arrow-soft" markerWidth="8" markerHeight="8" refX="2" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 L2,4 z" fill="var(--soft)"/></marker>
+  <marker id="arrow-purple" markerWidth="9" markerHeight="9" refX="2" refY="4.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L9,4.5 L0,9 L2.3,4.5 z" fill="var(--planner)"/></marker>
+  <marker id="arrow-loop" markerWidth="11" markerHeight="11" refX="2.5" refY="5.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L11,5.5 L0,11 L2.8,5.5 z" fill="var(--loop)"/></marker>
+  <marker id="arrow-result" markerWidth="10" markerHeight="10" refX="2.5" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L10,5 L0,10 L2.5,5 z" fill="var(--result)"/></marker>
+</defs>
+
+<rect width="1440" height="820" rx="24" fill="var(--paper)"/>
+
+<!-- outer return/recovery flows: intentional visual frame -->
+<path class="recovery" d="M480 674 H52 Q34 674 34 656 V323 Q34 305 52 305 H469" marker-end="url(#arrow-loop)"/>
+<path class="result-flow" d="M960 674 H1388 Q1406 674 1406 656 V171 Q1406 153 1388 153 H971" marker-end="url(#arrow-result)"/>
+
+<!-- primary task flow -->
+<path class="flow" d="M720 94 V119" marker-end="url(#arrow-core)"/>
+<path class="flow" d="M720 214 V263" marker-end="url(#arrow-core)"/>
+<path class="flow" d="M720 357 V387" marker-end="url(#arrow-core)"/>
+<path class="flow" d="M720 477 V507" marker-end="url(#arrow-core)"/>
+<path class="flow" d="M720 597 V627" marker-end="url(#arrow-core)"/>
+
+<!-- side flows -->
+<path class="soft-flow" d="M390 318 H469" marker-end="url(#arrow-soft)"/>
+<path class="soft-flow" d="M390 432 H469" marker-end="url(#arrow-soft)"/>
+<path class="model-flow" d="M971 432 H1039" marker-end="url(#arrow-purple)"/>
+<path class="model-flow" d="M1039 446 H971" marker-end="url(#arrow-purple)"/>
+<path class="flow" d="M469 552 H401" marker-end="url(#arrow-core)"/>
+<path class="flow" d="M971 552 H1039" marker-end="url(#arrow-core)"/>
+
+<!-- flow labels -->
+<rect x="654" y="482" width="132" height="20" rx="10" fill="var(--paper)"/><text x="720" y="496" text-anchor="middle" class="tiny mono">PLANNER DECISION</text>
+<rect x="656" y="602" width="128" height="20" rx="10" fill="var(--paper)"/><text x="720" y="616" text-anchor="middle" class="tiny mono">EXECUTION RESULT</text>
+<rect x="75" y="642" width="306" height="25" rx="12.5" fill="var(--phone-bg)" stroke="var(--phone)" stroke-width=".8"/><text x="228" y="659" text-anchor="middle" class="small" style="fill:var(--loop);font-weight:650">失败 / UNKNOWN / 需补充 → retry · recovery · re-plan</text>
+<rect x="1058" y="642" width="272" height="25" rx="12.5" fill="var(--core-bg)" stroke="var(--core)" stroke-width=".8"/><text x="1194" y="659" text-anchor="middle" class="small" style="fill:var(--result);font-weight:650">SSE · read model · result / attention</text>
+
+<!-- top: user -->
+<g class="shadow">
+  <rect x="520" y="24" width="400" height="70" rx="20" class="card phone"/>
+</g>
+<g transform="translate(548 39)" style="color:var(--phone)">
+  <circle class="icon" cx="18" cy="12" r="7"/><path class="icon" d="M5 39c1.6-9 8.1-14 13-14s11.4 5 13 14"/>
+</g>
+<text x="602" y="53" class="title" style="fill:var(--phone)">用户</text>
+<text x="602" y="76" class="subtitle">自然语言 · 语音 · 图片 · 文件</text>
+
+<!-- iPhone app -->
+<g class="shadow"><rect x="470" y="126" width="500" height="88" rx="18" class="card phone"/></g>
+<g transform="translate(498 146)" style="color:var(--phone)">
+  <rect class="icon" x="7" y="0" width="27" height="48" rx="7"/><line class="icon" x1="15" y1="5" x2="26" y2="5"/><circle cx="20.5" cy="41" r="1.8" fill="currentColor"/>
+</g>
+<text x="558" y="157" class="title">iPhone App</text>
+<text x="558" y="180" class="subtitle">Home · Task · Inbox · Upload · Live Activity</text>
+<rect x="825" y="145" width="116" height="46" rx="10" class="chip"/><text x="883" y="162" text-anchor="middle" class="tiny mono">TRUSTED EDGE</text><text x="883" y="180" text-anchor="middle" class="small">权限 · 原生执行</text>
+
+<text x="485" y="250" class="eyebrow">TASK MODE · DURABLE EXECUTION LOOP</text>
+
+<!-- state & memory left -->
+<text x="60" y="279" class="eyebrow">STATE &amp; MEMORY</text>
+<g class="shadow"><rect x="60" y="288" width="330" height="60" rx="15" class="card data"/></g>
+<g transform="translate(82 303)" style="color:var(--data)"><ellipse class="icon" cx="18" cy="5" rx="14" ry="5"/><path class="icon" d="M4 5v22c0 3 6 5 14 5s14-2 14-5V5M4 16c0 3 6 5 14 5s14-2 14-5"/></g>
+<text x="130" y="314" class="title" style="font-size:17px">SQLite</text><text x="130" y="334" class="subtitle">TaskState · Action · Attempt · Trace · Timeline</text>
+
+<g class="shadow"><rect x="60" y="402" width="330" height="60" rx="15" class="card data"/></g>
+<g transform="translate(82 417)" style="color:var(--data)"><circle class="icon" cx="18" cy="15" r="7"/><circle class="icon" cx="6" cy="7" r="3"/><circle class="icon" cx="30" cy="7" r="3"/><circle class="icon" cx="6" cy="26" r="3"/><circle class="icon" cx="30" cy="26" r="3"/><path class="icon" d="M11 10l3 2m11-2l-3 2M11 24l3-3m11 3l-3-3"/></g>
+<text x="130" y="428" class="title" style="font-size:17px">Mem0</text><text x="130" y="448" class="subtitle">跨 Task 长期记忆 · 相关检索后注入 Planner</text>
+
+<!-- core cards -->
+<g class="shadow"><rect x="480" y="274" width="480" height="83" rx="18" class="card main"/></g>
+<g transform="translate(510 294)" style="color:var(--core)"><rect class="icon" x="0" y="0" width="38" height="12" rx="4"/><rect class="icon" x="0" y="18" width="38" height="12" rx="4"/><circle cx="7" cy="6" r="1.6" fill="currentColor"/><circle cx="7" cy="24" r="1.6" fill="currentColor"/></g>
+<text x="570" y="305" class="title">Host Runtime</text><text x="570" y="330" class="subtitle">FastAPI · Task · Action · Attempt</text>
+<rect x="825" y="292" width="105" height="22" rx="11" class="chip"/><text x="877.5" y="307" text-anchor="middle" class="tiny mono">SUPERVISOR</text>
+<rect x="825" y="320" width="105" height="22" rx="11" class="chip"/><text x="877.5" y="335" text-anchor="middle" class="tiny mono">AUTH · WAIT</text>
+
+<g class="shadow"><rect x="480" y="388" width="480" height="89" rx="18" class="card planner"/></g>
+<g transform="translate(509 410)" style="color:var(--planner)"><circle class="icon" cx="19" cy="5" r="4"/><circle class="icon" cx="6" cy="28" r="4"/><circle class="icon" cx="32" cy="28" r="4"/><path class="icon" d="M17 9L9 24m12-15l8 15M10 28h18"/></g>
+<text x="570" y="420" class="title">LangGraph Planner</text><text x="570" y="445" class="subtitle">StateGraph · Context · Memory · Recovery</text>
+<rect x="817" y="407" width="113" height="22" rx="11" class="chip"/><text x="873.5" y="422" text-anchor="middle" class="tiny mono">DISCOVERY</text>
+<rect x="817" y="435" width="113" height="22" rx="11" class="chip"/><text x="873.5" y="450" text-anchor="middle" class="tiny mono">RE-PLAN</text>
+
+<g class="shadow"><rect x="480" y="508" width="480" height="89" rx="18" class="card main"/></g>
+<g transform="translate(506 529)" style="color:var(--core)"><circle class="icon" cx="20" cy="17" r="6"/><rect class="icon" x="2" y="2" width="9" height="9" rx="2"/><rect class="icon" x="29" y="2" width="9" height="9" rx="2"/><rect class="icon" x="2" y="25" width="9" height="9" rx="2"/><rect class="icon" x="29" y="25" width="9" height="9" rx="2"/><path class="icon" d="M11 9l5 5m13-5l-5 5M11 29l5-7m13 7l-5-7"/></g>
+<text x="570" y="540" class="title">Capability &amp; Execution</text><text x="570" y="565" class="subtitle">Registry · Policy · Dispatch · Retry</text>
+<rect x="819" y="527" width="111" height="22" rx="11" class="chip"/><text x="874.5" y="542" text-anchor="middle" class="tiny mono">IDEMPOTENCY</text>
+<rect x="819" y="555" width="111" height="22" rx="11" class="chip"/><text x="874.5" y="570" text-anchor="middle" class="tiny mono">SOURCE ROUTING</text>
+
+<g class="shadow"><rect x="480" y="628" width="480" height="92" rx="18" class="card main"/></g>
+<g transform="translate(507 650)" style="color:var(--core)"><circle class="icon" cx="20" cy="18" r="17"/><path class="icon" d="M10 18l7 7 13-15"/></g>
+<text x="570" y="661" class="title">Verification / Readback</text><text x="570" y="686" class="subtitle">Verify · Reconcile · Read Model · Timeline</text>
+<rect x="823" y="647" width="107" height="22" rx="11" class="chip"/><text x="876.5" y="662" text-anchor="middle" class="tiny mono">SUCCESS / UNKNOWN</text>
+<rect x="823" y="675" width="107" height="22" rx="11" class="chip"/><text x="876.5" y="690" text-anchor="middle" class="tiny mono">DELIVER</text>
+
+<!-- side execution cards -->
+<g class="shadow"><rect x="60" y="508" width="330" height="112" rx="18" class="card main"/></g>
+<g transform="translate(82 534)" style="color:var(--core)"><rect class="icon" x="7" y="0" width="25" height="42" rx="6"/><path class="icon" d="M14 29l5 5 10-12"/></g>
+<text x="130" y="535" class="title" style="font-size:18px">iOS Native</text><text x="130" y="558" class="subtitle">Calendar · Reminder · Alarm · Contacts</text><text x="130" y="580" class="subtitle">Location · Notification · Photos</text>
+
+<g class="shadow"><rect x="1050" y="388" width="330" height="88" rx="18" class="card external"/></g>
+<g transform="translate(1072 410)" style="color:var(--external)"><rect class="icon" x="3" y="2" width="34" height="28" rx="5"/><path class="icon" d="M12 2v-5m8 5v-5m8 5v-5M12 30v5m8-5v5m8-5v5M3 10h-5m5 12h-5m39-12h5m-5 12h5"/></g>
+<text x="1120" y="420" class="title" style="font-size:18px">LLM / Vision</text><text x="1120" y="443" class="subtitle">OpenAI-compatible · Qwen · DeepSeek · Kimi</text><text x="1120" y="462" class="small">结构化决策 · 视觉理解 · Observation summary</text>
+
+<g class="shadow"><rect x="1050" y="508" width="330" height="112" rx="18" class="card external"/></g>
+<g transform="translate(1072 535)" style="color:var(--external)"><path class="icon" d="M6 27h27a9 9 0 0 0 1-18 13 13 0 0 0-24 3A8 8 0 0 0 6 27z"/></g>
+<text x="1120" y="535" class="title" style="font-size:18px">Providers &amp; Host Tools</text><text x="1120" y="558" class="subtitle">Amap · Exa · FlyAI · Web / HTTP</text><text x="1120" y="580" class="subtitle">MCP · CLI · Materials · PDF · OCR · DOCX</text>
+
+<!-- observation lane -->
+<rect x="250" y="748" width="940" height="48" rx="15" class="card obs" stroke-dasharray="6 5"/>
+<text x="270" y="742" class="eyebrow">OBSERVATION MODE · 独立生命周期</text>
+<rect x="280" y="758" width="215" height="28" rx="10" class="chip"/><text x="387.5" y="777" text-anchor="middle" class="small">iPhone Capture · Screen / Audio</text>
+<path class="soft-flow" d="M502 772 H578" marker-end="url(#arrow-soft)"/>
+<rect x="590" y="758" width="235" height="28" rx="10" class="chip"/><text x="707.5" y="777" text-anchor="middle" class="small">ObservationService · Journal</text>
+<path class="soft-flow" d="M832 772 H908" marker-end="url(#arrow-soft)"/>
+<rect x="920" y="758" width="240" height="28" rx="10" class="chip"/><text x="1040" y="777" text-anchor="middle" class="small">Observation SQLite · Summary / Q&amp;A</text>
+
+</svg>
