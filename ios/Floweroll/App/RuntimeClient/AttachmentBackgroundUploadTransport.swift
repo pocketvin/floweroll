@@ -111,14 +111,14 @@ private struct BackgroundAttachmentUploadDescriptor: Codable, Sendable {
 final class BackgroundAttachmentUploadWaiter: @unchecked Sendable {
     let onEvent: (@Sendable (AttachmentUploadEvent) -> Void)?
     private let lock = NSLock()
-    private var continuation: CheckedContinuation<TaskMaterialFile, Error>?
-    private var result: Result<TaskMaterialFile, Error>?
+    private var continuation: CheckedContinuation<Void, Error>?
+    private var result: Result<Void, Error>?
 
     init(onEvent: (@Sendable (AttachmentUploadEvent) -> Void)? = nil) {
         self.onEvent = onEvent
     }
 
-    func install(_ continuation: CheckedContinuation<TaskMaterialFile, Error>) -> Bool {
+    func install(_ continuation: CheckedContinuation<Void, Error>) -> Bool {
         lock.lock()
         if let result {
             lock.unlock()
@@ -130,7 +130,7 @@ final class BackgroundAttachmentUploadWaiter: @unchecked Sendable {
         return true
     }
 
-    func finish(_ result: Result<TaskMaterialFile, Error>) {
+    func finish(_ result: Result<Void, Error>) {
         lock.lock()
         guard self.result == nil else { lock.unlock(); return }
         self.result = result
@@ -211,16 +211,21 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
         _ = session
     }
 
-    func upload(
+    func uploadBytes(
         attachment: PendingAttachment,
         baseURL: URL,
         bearerToken: String?,
+        startingOffset: Int,
         onEvent: (@Sendable (AttachmentUploadEvent) -> Void)?
-    ) async throws -> TaskMaterialFile {
+    ) async throws {
         guard AttachmentBackgroundUploadPolicy.shouldUseSystemBackgroundTransfer(baseURL: baseURL) else {
             throw HostClientSecurityError.invalidEndpoint
         }
         _ = try attachment.verifiedFileURL()
+        guard startingOffset >= 0, startingOffset <= attachment.sizeBytes else {
+            throw URLError(.badURL)
+        }
+        guard startingOffset < attachment.sizeBytes else { return }
 
         let waiter = Waiter(onEvent: onEvent)
         return try await withTaskCancellationHandler {
@@ -246,22 +251,33 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
                     if let existing = tasks.first(where: {
                         BackgroundAttachmentUploadJob.decode($0.taskDescription)?.attachment.id == attachment.id
                     }), let job = BackgroundAttachmentUploadJob.decode(existing.taskDescription) {
-                        switch AttachmentBackgroundUploadPolicy.existingTaskDisposition(for: existing.state) {
-                        case .reuse:
-                            self.emitExistingTask(job, task: existing)
-                            return
-                        case .resume:
-                            existing.resume()
-                            self.emitExistingTask(job, task: existing)
-                            return
-                        case .replace:
-                            break
+                        // Builds before this fix could leave a zero-byte background
+                        // `begin` task running indefinitely. Retire it without
+                        // delivering a cancellation to the new waiter; the normal
+                        // Host control plane already established startingOffset.
+                        if job.operation == .begin {
+                            existing.taskDescription = nil
+                            existing.cancel()
+                            self.removeBodyFile(job)
+                        } else {
+                            switch AttachmentBackgroundUploadPolicy.existingTaskDisposition(for: existing.state) {
+                            case .reuse:
+                                self.emitExistingTask(job, task: existing)
+                                return
+                            case .resume:
+                                existing.resume()
+                                self.emitExistingTask(job, task: existing)
+                                return
+                            case .replace:
+                                break
+                            }
                         }
                     }
                     do {
-                        try self.scheduleBegin(
+                        try self.scheduleChunk(
                             attachment: attachment,
                             baseURL: baseURL,
+                            offset: startingOffset,
                             recoveryCount: 0
                         )
                     } catch {
@@ -361,7 +377,14 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
                 finish(attachmentID: job.attachment.id, result: .failure(CancellationError()))
                 return
             }
-            recover(job, reason: error)
+            if job.operation == .begin {
+                finish(
+                    attachmentID: job.attachment.id,
+                    result: .failure(MaterialsError.message("旧版附件确认任务未完成，已保留文件；重新发送会从服务器状态继续。"))
+                )
+            } else {
+                recover(job, reason: error)
+            }
             return
         }
         guard let response = task.response as? HTTPURLResponse else {
@@ -424,7 +447,7 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
 
         if descriptor.complete {
             guard let file = descriptor.file else { throw URLError(.badServerResponse) }
-            finish(attachmentID: job.attachment.id, result: .success(file))
+            finish(attachmentID: job.attachment.id, result: .success(()))
             removeTransferDirectory(attachmentID: job.attachment.id)
             return
         }
@@ -469,12 +492,12 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
         )
 
         if confirmedOffset == job.attachment.sizeBytes {
+            // PATCH offset is durable byte-transfer truth. The caller performs
+            // the small immutable GET receipt on the ordinary session before
+            // claiming attachment completion.
             emit(attachmentID: job.attachment.id, state: .reconciling)
-            try scheduleBegin(
-                attachment: job.attachment,
-                baseURL: try endpoint(job),
-                recoveryCount: 0
-            )
+            finish(attachmentID: job.attachment.id, result: .success(()))
+            removeTransferDirectory(attachmentID: job.attachment.id)
         } else {
             try scheduleChunk(
                 attachment: job.attachment,
@@ -496,52 +519,22 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
         }
         emit(attachmentID: job.attachment.id, state: .reconciling)
         do {
-            try scheduleBegin(
+            // Replaying the exact same PATCH offset is safe: if Host committed
+            // the prior bytes but its response was lost, it answers 409 with
+            // the authoritative newer offset and handleChunk advances from it.
+            try scheduleChunk(
                 attachment: job.attachment,
                 baseURL: try endpoint(job),
-                recoveryCount: next,
-                previousOffset: job.offset
+                offset: job.offset,
+                recoveryCount: next
             )
         } catch {
             finish(attachmentID: job.attachment.id, result: .failure(error))
         }
     }
 
-    private func scheduleBegin(
-        attachment: PendingAttachment,
-        baseURL: URL,
-        recoveryCount: Int,
-        previousOffset: Int = 0
-    ) throws {
-        let bodyURL = try bodyFileURL(attachmentID: attachment.id, prefix: "begin")
-        try Data().write(
-            to: bodyURL,
-            options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
-        )
-        var request = authenticatedRequest(
-            method: "POST",
-            url: endpointURL(baseURL, path: ["v1", "files", "uploads"]),
-            attachmentID: attachment.id,
-            baseURL: baseURL
-        )
-        request.setValue(String(attachment.sizeBytes), forHTTPHeaderField: "Upload-Length")
-        request.setValue(attachment.id, forHTTPHeaderField: "X-File-ID")
-        request.setValue(
-            attachment.name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
-            forHTTPHeaderField: "X-File-Name"
-        )
-        request.setValue(attachment.mediaType, forHTTPHeaderField: "X-File-Media-Type")
-        request.setValue(attachment.sha256, forHTTPHeaderField: "X-Content-SHA256")
-        let job = BackgroundAttachmentUploadJob(
-            attachment: attachment,
-            endpoint: baseURL.absoluteString,
-            operation: .begin,
-            offset: previousOffset,
-            recoveryCount: recoveryCount,
-            bodyFileName: bodyURL.lastPathComponent
-        )
-        schedule(request: request, bodyURL: bodyURL, job: job, expectedBytes: 0)
-    }
+    // `.begin` stays in BackgroundAttachmentUploadJob only to decode and
+    // retire in-flight zero-byte tasks created by older installed builds.
 
     private func scheduleChunk(
         attachment: PendingAttachment,
@@ -675,7 +668,7 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
         for callback in callbacks { callback(event) }
     }
 
-    private func finish(attachmentID: String, result: Result<TaskMaterialFile, Error>) {
+    private func finish(attachmentID: String, result: Result<Void, Error>) {
         lock.lock()
         let values = waiters.removeValue(forKey: attachmentID) ?? []
         tokenOverrides.removeValue(forKey: attachmentID)

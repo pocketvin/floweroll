@@ -396,13 +396,43 @@ struct FlowerollHostClient: Sendable {
         onEvent?(.init(attachmentID: attachment.id, state: .checkingHost))
 
         if AttachmentBackgroundUploadPolicy.shouldUseSystemBackgroundTransfer(baseURL: baseURL) {
-            let file = try await AttachmentBackgroundUploadTransport.shared.upload(
-                attachment: attachment,
-                baseURL: baseURL,
-                bearerToken: bearerToken,
+            // Control-plane requests are tiny and latency-sensitive. Running the
+            // zero-byte create/readback handshake as a background upload can be
+            // deferred by iOS for minutes, leaving Home stuck at "checking".
+            // Resolve Host offset immediately here; only actual file bytes are
+            // handed to the system-owned background URLSession.
+            if let existing = try await uploadedAttachmentReceipt(fileID: attachment.id) {
+                return try verifyUploadedAttachment(existing, expected: attachment, onEvent: onEvent)
+            }
+            let descriptor = try await ensureResumableUpload(
+                attachment,
+                mayRetryCreate: true,
                 onEvent: onEvent
             )
-            return try verifyUploadedAttachment(file, expected: attachment, onEvent: onEvent)
+            if let file = descriptor.file {
+                return try verifyUploadedAttachment(file, expected: attachment, onEvent: onEvent)
+            }
+            guard descriptor.offset >= 0, descriptor.offset <= attachment.sizeBytes else {
+                throw MaterialsError.message("服务器返回了无效的附件上传位置，已停止重试。")
+            }
+            if descriptor.offset < attachment.sizeBytes {
+                try await AttachmentBackgroundUploadTransport.shared.uploadBytes(
+                    attachment: attachment,
+                    baseURL: baseURL,
+                    bearerToken: bearerToken,
+                    startingOffset: descriptor.offset,
+                    onEvent: onEvent
+                )
+            }
+            onEvent?(.init(attachmentID: attachment.id, state: .reconciling))
+            if let receipt = try await uploadedAttachmentReceipt(fileID: attachment.id) {
+                return try verifyUploadedAttachment(receipt, expected: attachment, onEvent: onEvent)
+            }
+            if let state = try await resumableUploadState(fileID: attachment.id), state.complete,
+               let receipt = try await uploadedAttachmentReceipt(fileID: attachment.id) {
+                return try verifyUploadedAttachment(receipt, expected: attachment, onEvent: onEvent)
+            }
+            throw MaterialsError.message("附件字节已传完，但服务器尚未发布可校验记录，请稍后重试。")
         }
 
         if let existing = try await uploadedAttachmentReceipt(fileID: attachment.id) {

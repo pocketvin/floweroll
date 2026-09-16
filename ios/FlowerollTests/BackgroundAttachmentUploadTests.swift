@@ -120,6 +120,22 @@ final class BackgroundAttachmentUploadTests: XCTestCase {
         XCTAssertTrue(store.contains("AttachmentBackgroundUploadTransport.shared.refreshProgress()"))
     }
 
+    func testBackgroundTransferOwnsBytesButNotZeroByteControlPlane() throws {
+        let appRoot = try ProductSourceFiles.iosRoot().appendingPathComponent("Floweroll/App/RuntimeClient")
+        let client = try String(contentsOf: appRoot.appendingPathComponent("FlowerollHostClient.swift"), encoding: .utf8)
+        let transport = try String(contentsOf: appRoot.appendingPathComponent("AttachmentBackgroundUploadTransport.swift"), encoding: .utf8)
+        let remoteBranch = try XCTUnwrap(client.range(of: "shouldUseSystemBackgroundTransfer(baseURL: baseURL)"))
+        let remoteTail = String(client[remoteBranch.lowerBound...])
+        XCTAssertLessThan(
+            try XCTUnwrap(remoteTail.range(of: "ensureResumableUpload(")).lowerBound,
+            try XCTUnwrap(remoteTail.range(of: "AttachmentBackgroundUploadTransport.shared.uploadBytes(")).lowerBound
+        )
+        XCTAssertTrue(transport.contains("func uploadBytes("))
+        XCTAssertTrue(transport.contains("try self.scheduleChunk("))
+        XCTAssertFalse(transport.contains("func scheduleBegin("))
+        XCTAssertTrue(transport.contains("job.operation == .begin"), "legacy zero-byte background begin tasks must be retired during upgrade")
+    }
+
     func testProductSourceUsesBackgroundFileUploadWithoutBGCPT() throws {
         let appRoot = try ProductSourceFiles.iosRoot().appendingPathComponent("Floweroll/App")
         let transport = try String(
@@ -148,7 +164,7 @@ extension BackgroundAttachmentUploadTests {
         let waiter = BackgroundAttachmentUploadWaiter()
         waiter.finish(.failure(CancellationError()))
         do {
-            let _: TaskMaterialFile = try await withCheckedThrowingContinuation { continuation in
+            let _: Void = try await withCheckedThrowingContinuation { continuation in
                 XCTAssertFalse(waiter.install(continuation))
             }
             XCTFail("Expected cancellation")
@@ -162,7 +178,7 @@ extension BackgroundAttachmentUploadTests {
         XCTAssertTrue(cancelled.isFinished)
         XCTAssertFalse(other.isFinished)
         do {
-            let _: TaskMaterialFile = try await withCheckedThrowingContinuation { continuation in
+            let _: Void = try await withCheckedThrowingContinuation { continuation in
                 XCTAssertTrue(other.install(continuation))
                 other.finish(.failure(URLError(.timedOut)))
                 other.finish(.failure(CancellationError()))

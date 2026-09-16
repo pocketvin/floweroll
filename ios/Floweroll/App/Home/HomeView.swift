@@ -41,6 +41,7 @@ struct HomeView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("floweroll.homeSeenTerminalTaskIDs") private var seenTerminalTaskIDsJSON = "[]"
     @AppStorage("floweroll.homeComposerDraftText") private var composerText = ""
+    @AppStorage("floweroll.homePendingSubmissionID") private var persistedHomeSubmissionID = ""
     @State private var attachmentDraft = TaskAttachmentDraft()
     @State private var attachmentTurnID = UUID().uuidString
     @State private var isRecording = false
@@ -570,6 +571,9 @@ struct HomeView: View {
             scrollOwnership.beginGeneration(runtimeStore.currentHomeThreadID)
             ensureFocusedTask()
             runtimeStore.preuploadAttachments(attachmentDraft.items)
+            Task { @MainActor in
+                await restorePendingHomeSubmissionIdentity()
+            }
             if AVAudioApplication.shared.recordPermission == .granted {
                 Task { @MainActor in
                     try? await AudioCaptureService.shared.prepare()
@@ -610,6 +614,7 @@ struct HomeView: View {
             homeClock = Date()
             runtimeStore.preuploadAttachments(attachmentDraft.items)
             Task { @MainActor in
+                await restorePendingHomeSubmissionIdentity()
                 await runtimeStore.refreshCurrentHomeThreadFast()
             }
         }
@@ -1161,11 +1166,69 @@ struct HomeView: View {
         return base + (needsSpace ? " " : "") + transcript
     }
 
+    @MainActor
+    private func restorePendingHomeSubmissionIdentity() async {
+        guard activeHomeIntentSubmissionID == nil else { return }
+        let normalized = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else {
+            persistedHomeSubmissionID = ""
+            return
+        }
+
+        var pending: PendingSubmission?
+        if !persistedHomeSubmissionID.isEmpty {
+            let durableSubmissionID = persistedHomeSubmissionID
+            pending = await runtimeStore.pendingSubmission(submissionID: durableSubmissionID)
+            if pending == nil,
+               let admitted = await runtimeStore.admittedTaskForSubmissionID(durableSubmissionID) {
+                // Bootstrap can win the race and consume the outbox before Home
+                // receives an in-process AppIntent callback. Reconcile the exact
+                // durable submission instead of leaving stale text that could be
+                // sent again as a brand-new Task.
+                let attachmentIDs = Set(attachmentDraft.items.map(\.id))
+                composerText = ""
+                attachmentDraft.clearSubmitted(attachmentIDs)
+                runtimeStore.clearAttachmentUploadStates(attachmentIDs)
+                focusedTaskID = admitted.taskID
+                attachmentTurnID = UUID().uuidString
+                persistedHomeSubmissionID = ""
+                composerError = nil
+                composerMessage = "已经交给小卷。"
+                return
+            }
+            if pending == nil {
+                // The exact id is still the only retry identity even if neither
+                // local journal nor Host readback is currently reachable.
+                attachmentTurnID = durableSubmissionID
+                composerError = nil
+                composerMessage = "这次发送尚未确认；再次发送会继续同一次任务。"
+                return
+            }
+        }
+        if pending == nil, persistedHomeSubmissionID.isEmpty {
+            // One-time compatibility for sends created by builds before the
+            // durable Home identity key existed. Selection only: never merge or
+            // delete independent submissions with identical content.
+            pending = await runtimeStore.pendingHomeSubmission(
+                matching: normalized,
+                attachments: attachmentDraft.items
+            )
+            if let pending { persistedHomeSubmissionID = pending.submissionID }
+        }
+        guard let pending else { return }
+        attachmentTurnID = pending.submissionID
+        composerError = nil
+        composerMessage = pending.lastErrorMessage == nil
+            ? "这次发送仍在恢复；再次发送会继续同一次任务。"
+            : "这次发送已安全保留；再次发送会继续同一次任务。"
+    }
+
     private func beginHomeInAppIntentRequest() {
         guard activeHomeIntentSubmissionID == nil,
               shouldUseHomeInAppIntentButton
         else { return }
         let submissionID = attachmentTurnID
+        persistedHomeSubmissionID = submissionID
         activeHomeIntentSubmissionID = submissionID
         // Do not clear an already-arrived `started` event. Button(intent:) and
         // simultaneousGesture are both driven by the same tap, and their exact
@@ -1226,6 +1289,7 @@ struct HomeView: View {
                 focusedTaskID = taskID
             }
             attachmentTurnID = UUID().uuidString
+            persistedHomeSubmissionID = ""
             activeHomeIntentSubmissionID = nil
             enteredHomeIntentSubmissionID = nil
             composerError = nil
@@ -1293,6 +1357,7 @@ struct HomeView: View {
         let submissionID = attachmentTurnID
         let ids = Set(attachmentDraft.items.map(\.id))
         composerText = ""
+        persistedHomeSubmissionID = ""
         activeHomeIntentSubmissionID = nil
         enteredHomeIntentSubmissionID = nil
         composerError = nil

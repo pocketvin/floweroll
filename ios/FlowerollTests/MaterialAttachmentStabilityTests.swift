@@ -97,6 +97,59 @@ final class MaterialAttachmentStabilityTests: XCTestCase {
         super.tearDown()
     }
 
+    @MainActor
+    func testAdmittedHomeSubmissionReadbackUsesExactDurableIdentity() async throws {
+        let suiteName = "MaterialAttachmentStabilityTests.admitted-home.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("http://localhost", forKey: RuntimeTaskStore.endpointDefaultsKey)
+        MaterialURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/v1/submissions/submission-admitted/task")
+            return MaterialMockResponse(
+                200,
+                try Self.taskJSON(
+                    submissionID: "submission-admitted",
+                    taskID: "task-admitted",
+                    threadID: "thread-admitted"
+                )
+            )
+        }
+        let store = RuntimeTaskStore(
+            defaults: defaults,
+            session: makeSession(),
+            pendingStore: nil,
+            deviceWorker: nil
+        )
+        let task = await store.admittedTaskForSubmissionID("submission-admitted")
+        XCTAssertEqual(task?.taskID, "task-admitted")
+        XCTAssertEqual(task?.submissionID, "submission-admitted")
+    }
+
+    @MainActor
+    func testPendingHomeSubmissionIdentityReusesOldestExactDraft() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let journal = try PendingSubmissionStore(directoryURL: directory)
+        let attachment = PendingAttachment(
+            id: "same-file", name: "资料.docx", mediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            sizeBytes: 10, sha256: String(repeating: "a", count: 64), storedName: "same-file.docx"
+        )
+        _ = try await journal.create(
+            text: "同一草稿", invocationSource: "ios_home_in_app", attachments: [attachment],
+            submissionID: "submission-old", createdAt: Date(timeIntervalSince1970: 10)
+        )
+        _ = try await journal.create(
+            text: "同一草稿", invocationSource: "ios_home_in_app", attachments: [attachment],
+            submissionID: "submission-new", createdAt: Date(timeIntervalSince1970: 20)
+        )
+        let suiteName = "MaterialAttachmentStabilityTests.pending-home.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = RuntimeTaskStore(defaults: defaults, pendingStore: journal, deviceWorker: nil)
+        let restored = await store.pendingHomeSubmission(matching: "同一草稿", attachments: [attachment])
+        XCTAssertEqual(restored?.submissionID, "submission-old")
+    }
+
     func testSiblingTaskSenderCanConvergeAfterAcknowledgementWithoutFalseCancellation() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }

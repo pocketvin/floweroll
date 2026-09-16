@@ -1866,6 +1866,37 @@ final class RuntimeTaskStore {
         try? FileManager.default.removeItem(at: url)
     }
 
+    func pendingSubmission(submissionID: String) async -> PendingSubmission? {
+        guard let pendingStore else { return nil }
+        return await pendingStore.submission(id: submissionID)
+    }
+
+    func admittedTaskForSubmissionID(_ submissionID: String) async -> HostTask? {
+        let normalized = submissionID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty, let client = try? makeClient() else { return nil }
+        return try? await client.taskForSubmissionID(normalized)
+    }
+
+    func pendingHomeSubmission(
+        matching text: String,
+        attachments: [PendingAttachment]
+    ) async -> PendingSubmission? {
+        guard let pendingStore else { return nil }
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+        return await pendingStore.pending()
+            .filter {
+                $0.invocationSource == "ios_home_in_app"
+                    && $0.parentTaskID == nil
+                    && $0.text == normalized
+                    && ($0.attachments ?? []) == attachments
+            }
+            .min {
+                if $0.createdAt == $1.createdAt { return $0.submissionID < $1.submissionID }
+                return $0.createdAt < $1.createdAt
+            }
+    }
+
     func retryPendingSubmissions() async {
         guard let pendingStore, let client = try? makeClient() else { return }
         for pending in await pendingStore.pending() {
