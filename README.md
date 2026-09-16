@@ -4,6 +4,88 @@
 
 它将任务的持久状态和执行调度放在 Host，把手机作为可信的系统能力执行端与交互端。另有独立的观察模式，用于记录用户明确选择的声音和屏幕信息、整理纪要与问答。
 
+## 核心架构
+
+```mermaid
+flowchart TB
+  USER(["👤 用户"])
+
+  subgraph DEVICE["📱 iPhone · 可信交互与原生执行"]
+    direction LR
+    UI["Home · Task · Inbox"]
+    NATIVE["Native Execution<br/>EventKit · AlarmKit · Contacts"]
+    OBS["Observation Capture<br/>Screen · Audio · Camera"]
+    PRESENT["Presentation<br/>SSE · Notification · Live Activity"]
+  end
+
+  subgraph HOST["☁️ Floweroll Host · 持久语义与编排"]
+    direction LR
+    API["FastAPI · Pydantic"]
+    RUNTIME["Durable Task Runtime<br/>Task · Action · Attempt"]
+    PLANNER["LangGraph Planner<br/>Context · Memory · Recovery"]
+    CAP["Capability Registry<br/>semantic capabilities"]
+    EXEC["Execution Runtime<br/>policy · retry · reconciliation"]
+    VERIFY["Verification / Readback"]
+    MATERIAL["Materials & Artifacts<br/>PDF · OCR · DOCX"]
+    OBSVC["ObservationService<br/>analysis · summary"]
+  end
+
+  subgraph STATE["💾 Durable State"]
+    direction LR
+    TASKDB[("SQLite<br/>Task Truth")]
+    MEMORY[("Mem0<br/>Long-term Memory")]
+    OBSDB[("Observation<br/>SQLite")]
+  end
+
+  subgraph EXTERNAL["🌐 Models & Providers"]
+    direction LR
+    MODELS["LLM / Vision Models"]
+    PROVIDERS["API · MCP · CLI · Web"]
+  end
+
+  USER --> UI
+  UI -->|"Task · 后续输入 · 附件"| API
+  API --> RUNTIME
+  RUNTIME --> PLANNER
+  PLANNER <-->|"retrieve / inject"| MEMORY
+  PLANNER <-->|"model call"| MODELS
+  PLANNER -->|"PlannerDecision"| CAP
+  CAP --> EXEC
+  EXEC --> NATIVE
+  EXEC --> PROVIDERS
+  NATIVE --> VERIFY
+  PROVIDERS --> VERIFY
+  VERIFY -->|"verified result"| RUNTIME
+  RUNTIME <--> TASKDB
+  RUNTIME --> MATERIAL
+  RUNTIME --> PRESENT
+  PRESENT --> UI
+
+  USER -->|"显式开启观察"| OBS
+  OBS --> OBSVC
+  OBSVC <--> OBSDB
+  OBSVC <-->|"vision / summary"| MODELS
+
+  classDef user fill:#fff7ed,stroke:#f59e0b,color:#78350f,stroke-width:1.5px;
+  classDef device fill:#fff1f5,stroke:#d889a6,color:#5b2638,stroke-width:1.2px;
+  classDef host fill:#f4f7ff,stroke:#7f90c7,color:#26345f,stroke-width:1.2px;
+  classDef state fill:#eef9f3,stroke:#69a68b,color:#214b3a,stroke-width:1.2px;
+  classDef external fill:#f8f5ff,stroke:#9987c2,color:#433768,stroke-width:1.2px;
+
+  class USER user;
+  class UI,NATIVE,OBS,PRESENT device;
+  class API,RUNTIME,PLANNER,CAP,EXEC,VERIFY,MATERIAL,OBSVC host;
+  class TASKDB,MEMORY,OBSDB state;
+  class MODELS,PROVIDERS external;
+
+  style DEVICE fill:#fffafd,stroke:#e7b7c9,stroke-width:1px
+  style HOST fill:#fafbff,stroke:#b8c0dc,stroke-width:1px
+  style STATE fill:#f8fcfa,stroke:#add4c2,stroke-width:1px
+  style EXTERNAL fill:#fcfaff,stroke:#c9bee3,stroke-width:1px
+```
+
+**边界很明确：LangGraph 负责 Planner 内部的决策图；Floweroll Runtime 仍负责 Task / Action / Attempt、授权、verification、recovery 与 SQLite durable truth。**
+
 ## 两条真实工作链路
 
 ### Task Mode：一个任务怎样真正跑完
@@ -28,7 +110,12 @@ RuntimeSupervisor 唤醒 TaskRuntime
   ├─ Mem0 相关长期记忆
   └─ 当前相关的 semantic capabilities
         ↓
-OpenAI-compatible Planner
+LangGraph Planner Graph
+  ├─ Context Build / Evidence Compact
+  ├─ Capability Selection / Discovery
+  └─ Recovery Context
+        ↓
+OpenAI-compatible model call
         ↓
 结构化 PlannerDecision
         ↓
@@ -157,10 +244,11 @@ Planner 支持 OpenAI-compatible 接口；Mem0 用作辅助长期记忆，不替
 | **SQLite** | Task / Action / Attempt / Observation / Trace / Timeline 等 durable truth；不是普通 UI cache |
 | **Mem0 2.0.20** | 跨 Task 长期记忆辅助；只把相关 memory 投影进 Planner Context，不拥有 Task truth |
 | **HTTPX 0.28.1** | Mem0 等受控 HTTP client 路径 |
+| **LangGraph 1.2.11** | **Planner 内部的真实 `StateGraph` orchestration**：Memory、Context Build、Evidence Compact、Capability Selection、模型调用、恢复分支与契约校验；不拥有 Task durable truth |
 | **自研 Execution Runtime** | Action/Attempt、幂等、retry/wait、UNKNOWN reconciliation、verification/readback |
 | **MCP + managed CLI + bounded HTTP** | 统一接入高德、Exa、Context7、飞猪及额外 Provider，同时保持 semantic capability namespace |
 
-这里刻意没有整体迁 Temporal / LangGraph / TCA。当前 Runtime 已经有明确 durable state、恢复和 verification 语义，在真实维护成本出现前不为了“框架化”重写核心状态机。
+这里采用的是**“LangGraph 管 Planner，Floweroll Runtime 管 durable execution”**：Planner 已真实迁入 LangGraph `StateGraph`，但 Task / Action / Attempt、授权、verification、recovery 和 SQLite durable truth 仍由现有 Runtime 拥有。没有把整套 Runtime 再迁进 Temporal、LangGraph 或 TCA，避免产生第二套状态机。
 
 ### iOS / Apple 平台
 
