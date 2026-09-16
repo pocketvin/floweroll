@@ -373,6 +373,66 @@ final class SystemEntryOwnershipTests: XCTestCase {
         XCTAssertFalse(gate.claim())
     }
 
+    func testTaskScopedContinuationReservationIsReferenceCounted() {
+        var ledger = TaskScopedContinuationReservationLedger()
+        XCTAssertFalse(ledger.contains(taskID: "task-1"))
+
+        ledger.reserve(taskID: "task-1")
+        ledger.reserve(taskID: "task-1")
+        XCTAssertTrue(ledger.contains(taskID: "task-1"))
+        XCTAssertEqual(ledger.count(taskID: "task-1"), 2)
+
+        XCTAssertEqual(ledger.release(taskID: "task-1"), 1)
+        XCTAssertTrue(ledger.contains(taskID: "task-1"))
+        XCTAssertEqual(ledger.release(taskID: "task-1"), 0)
+        XCTAssertFalse(ledger.contains(taskID: "task-1"))
+    }
+
+    func testTaskScopedReservationOnlyHoldsStaleNeedsUserTruth() {
+        XCTAssertTrue(ContinuedTaskStableStatePolicy.shouldHoldForTaskScopedMutation(
+            status: "waiting",
+            hasPendingInteraction: true,
+            hasTaskScopedMutationReservation: true
+        ))
+        XCTAssertTrue(ContinuedTaskStableStatePolicy.shouldHoldForTaskScopedMutation(
+            status: "needs_user",
+            hasPendingInteraction: false,
+            hasTaskScopedMutationReservation: true
+        ))
+        XCTAssertFalse(ContinuedTaskStableStatePolicy.shouldHoldForTaskScopedMutation(
+            status: "waiting",
+            hasPendingInteraction: true,
+            hasTaskScopedMutationReservation: false
+        ))
+        XCTAssertFalse(ContinuedTaskStableStatePolicy.shouldHoldForTaskScopedMutation(
+            status: "completed",
+            hasPendingInteraction: true,
+            hasTaskScopedMutationReservation: true
+        ))
+        XCTAssertFalse(ContinuedTaskStableStatePolicy.shouldHoldForTaskScopedMutation(
+            status: "active",
+            hasPendingInteraction: false,
+            hasTaskScopedMutationReservation: true
+        ))
+    }
+
+    func testTaskScopedIntentReservesBeforeBGCPTAndReleasesOnBothOutcomes() throws {
+        let sourceURL = try ProductSourceFiles.iosRoot()
+            .appendingPathComponent("Floweroll/App/FlowerollIntents.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let scope = try XCTUnwrap(source.range(of: "struct TaskScopedHouIntent: AppIntent"))
+        let tail = String(source[scope.lowerBound...])
+        let reserve = try XCTUnwrap(tail.range(of: "beginTaskScopedMutationReservation("))
+        let submit = try XCTUnwrap(tail.range(of: "submitUserInitiatedContinuation("))
+        let mutate = try XCTUnwrap(tail.range(of: "performTaskScopedOperation("))
+        let firstRelease = try XCTUnwrap(tail.range(of: "endTaskScopedMutationReservation("))
+
+        XCTAssertLessThan(reserve.lowerBound, submit.lowerBound)
+        XCTAssertLessThan(submit.lowerBound, mutate.lowerBound)
+        XCTAssertLessThan(mutate.lowerBound, firstRelease.lowerBound)
+        XCTAssertEqual(tail.components(separatedBy: "endTaskScopedMutationReservation(").count - 1, 2)
+    }
+
     func testCustomActivityStartReusesOnlyMatchingTaskActivities() {
         XCTAssertEqual(
             FlowerollCustomActivityOwnershipPolicy.startDecision(matchingTaskActivityCount: 0),

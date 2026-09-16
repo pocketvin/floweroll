@@ -369,7 +369,12 @@ struct TaskScopedHouIntent: AppIntent {
         }
 
         // Existing task identity is already known, so foreground interaction can
-        // hand BGCPT the exact owner before the Host mutation starts.
+        // hand BGCPT the exact owner before the Host mutation starts. The Host
+        // still exposes the old needs-user snapshot for a short race window;
+        // reserve that Task until the exact mutation has been durably consumed.
+        await DeviceBackgroundExecutionController.shared.beginTaskScopedMutationReservation(
+            taskID: normalizedTaskID
+        )
         _ = await DeviceBackgroundExecutionController.shared.submitUserInitiatedContinuation(
             taskID: normalizedTaskID,
             goal: ""
@@ -379,6 +384,9 @@ struct TaskScopedHouIntent: AppIntent {
                 taskID: normalizedTaskID,
                 eventID: normalizedEventID,
                 operation: operation
+            )
+            await DeviceBackgroundExecutionController.shared.endTaskScopedMutationReservation(
+                taskID: normalizedTaskID
             )
             await TaskScopedInAppIntentEvents.postAccepted(
                 eventID: normalizedEventID,
@@ -391,6 +399,9 @@ struct TaskScopedHouIntent: AppIntent {
             )
             return .result()
         } catch {
+            await DeviceBackgroundExecutionController.shared.endTaskScopedMutationReservation(
+                taskID: normalizedTaskID
+            )
             await TaskScopedInAppIntentEvents.postFailure(
                 eventID: normalizedEventID,
                 sourceTaskID: normalizedTaskID,

@@ -228,6 +228,54 @@ final class BackgroundCompletionGate: @unchecked Sendable {
 }
 
 
+struct TaskScopedContinuationReservationLedger: Equatable {
+    private var counts: [String: Int] = [:]
+
+    mutating func reserve(taskID: String) {
+        let normalized = taskID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+        counts[normalized, default: 0] += 1
+    }
+
+    @discardableResult
+    mutating func release(taskID: String) -> Int {
+        let normalized = taskID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty, let count = counts[normalized] else { return 0 }
+        if count <= 1 {
+            counts.removeValue(forKey: normalized)
+            return 0
+        }
+        let remaining = count - 1
+        counts[normalized] = remaining
+        return remaining
+    }
+
+    func contains(taskID: String) -> Bool {
+        let normalized = taskID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !normalized.isEmpty && (counts[normalized] ?? 0) > 0
+    }
+
+    func count(taskID: String) -> Int {
+        let normalized = taskID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty ? 0 : (counts[normalized] ?? 0)
+    }
+}
+
+
+enum ContinuedTaskStableStatePolicy {
+    static func shouldHoldForTaskScopedMutation(
+        status: String,
+        hasPendingInteraction: Bool,
+        hasTaskScopedMutationReservation: Bool
+    ) -> Bool {
+        guard hasTaskScopedMutationReservation else { return false }
+        let normalized = status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !["completed", "failed", "cancelled"].contains(normalized) else { return false }
+        return hasPendingInteraction || normalized == "needs_user"
+    }
+}
+
+
 /// Keeps user-initiated 小卷 tasks eligible to continue after the app backgrounds.
 ///
 /// Presentation SSE is deliberately not part of this execution path. Host Task /
@@ -269,6 +317,7 @@ final class DeviceBackgroundExecutionController {
     private var globalExpired = false
     private var globalTaskProgress: [String: (completed: Int64, total: Int64)] = [:]
     private var finiteTaskHandoffs: [String: UIBackgroundTaskIdentifier] = [:]
+    private var taskScopedMutationReservations = TaskScopedContinuationReservationLedger()
     private var recoveryWork: Task<Void, Never>?
     private var recoveryScheduling = false
 
@@ -413,6 +462,35 @@ final class DeviceBackgroundExecutionController {
     ) {
         untrackContinuedOutbox(submissionID)
         endFiniteTaskHandoff(taskID: "outbox:" + submissionID, reason: reason)
+    }
+
+    /// A Task-scoped reply starts while Host may still expose the old
+    /// needs-user snapshot. Keep that exact Task eligible for the already-owned
+    /// BGCPT window until the Host mutation is durably acknowledged. This is
+    /// intentionally process-local: a crash/relaunch cannot leave a ghost lock,
+    /// while the persisted continued Task ID remains the durable execution hint.
+    func beginTaskScopedMutationReservation(taskID: String) {
+        let normalized = taskID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+        taskScopedMutationReservations.reserve(taskID: normalized)
+        recordDiagnostic(
+            event: "task_scoped_mutation_reservation_started",
+            taskID: normalized,
+            identifier: Self.globalContinuedIdentifier,
+            detail: "count=\(taskScopedMutationReservations.count(taskID: normalized))"
+        )
+    }
+
+    func endTaskScopedMutationReservation(taskID: String) {
+        let normalized = taskID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return }
+        let remaining = taskScopedMutationReservations.release(taskID: normalized)
+        recordDiagnostic(
+            event: "task_scoped_mutation_reservation_ended",
+            taskID: normalized,
+            identifier: Self.globalContinuedIdentifier,
+            detail: "remaining=\(remaining)"
+        )
     }
 
     /// An explicit system-entry continuation (Action Button / Siri / Shortcut)
@@ -1050,12 +1128,21 @@ final class DeviceBackgroundExecutionController {
     /// Returns true when no further device execution is required for this Task.
     private func consumeStableTaskState(_ view: HostTaskView) async -> Bool {
         let taskID = view.task.taskID
-        if view.pendingInteraction != nil,
-           !["completed", "failed", "cancelled"].contains(view.task.status.lowercased()) {
+        let status = view.task.status.lowercased()
+        let hasPendingInteraction = view.pendingInteraction != nil
+        if ContinuedTaskStableStatePolicy.shouldHoldForTaskScopedMutation(
+            status: status,
+            hasPendingInteraction: hasPendingInteraction,
+            hasTaskScopedMutationReservation: taskScopedMutationReservations.contains(taskID: taskID)
+        ) {
+            return false
+        }
+        if hasPendingInteraction,
+           !["completed", "failed", "cancelled"].contains(status) {
             untrack(taskID)
             return true
         }
-        switch view.task.status.lowercased() {
+        switch status {
         case "completed":
             untrack(taskID)
             await FlowerollTaskNotifications.notifyTerminalIfNeeded(
