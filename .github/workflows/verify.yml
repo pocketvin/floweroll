@@ -49,4 +49,9 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install --require-hashes -r dev/observability/requirements.lock
-      - run: python -m unittest dev.observability.test_console dev.observability.test_observation_projection dev.observability.test_observability dev.observability.test_namespace -v
+      - name: Run isolated observability regression
+        run: |
+          mkdir -p work
+          python -m unittest dev.observability.test_console dev.observability.test_observation_projection dev.observability.test_observability dev.observability.test_namespace dev.observability.test_topology dev.observability.test_operation_projection -v
+        env:
+          FLOWEROLL_OBSERVABILITY_CONFIG: /dev/null
