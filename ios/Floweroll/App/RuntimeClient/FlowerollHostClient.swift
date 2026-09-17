@@ -9,6 +9,12 @@ enum HostClientSecurityError: Error, Equatable {
 }
 
 
+enum AttachmentUploadExecutionMode: Sendable {
+    case systemBackground
+    case immediateResumable
+}
+
+
 struct FlowerollHostClient: Sendable {
     private struct TaskInput: Codable, Sendable {
         let kind: String
@@ -389,13 +395,15 @@ struct FlowerollHostClient: Sendable {
 
     func uploadTaskAttachment(
         _ attachment: PendingAttachment,
+        executionMode: AttachmentUploadExecutionMode = .systemBackground,
         onEvent: (@Sendable (AttachmentUploadEvent) -> Void)? = nil
     ) async throws -> TaskMaterialFile {
         try validateEndpointSecurity()
         let localURL = try attachment.verifiedFileURL()
         onEvent?(.init(attachmentID: attachment.id, state: .checkingHost))
 
-        if AttachmentBackgroundUploadPolicy.shouldUseSystemBackgroundTransfer(baseURL: baseURL) {
+        if AttachmentBackgroundUploadPolicy.shouldUseSystemBackgroundTransfer(baseURL: baseURL),
+           executionMode == .systemBackground {
             // Control-plane requests are tiny and latency-sensitive. Running the
             // zero-byte create/readback handshake as a background upload can be
             // deferred by iOS for minutes, leaving Home stuck at "checking".
@@ -433,6 +441,13 @@ struct FlowerollHostClient: Sendable {
                 return try verifyUploadedAttachment(receipt, expected: attachment, onEvent: onEvent)
             }
             throw MaterialsError.message("附件字节已传完，但服务器尚未发布可校验记录，请稍后重试。")
+        }
+
+        if executionMode == .immediateResumable,
+           AttachmentBackgroundUploadPolicy.shouldUseSystemBackgroundTransfer(baseURL: baseURL) {
+            await AttachmentBackgroundUploadTransport.shared.handoffToImmediateUpload(
+                attachmentID: attachment.id
+            )
         }
 
         if let existing = try await uploadedAttachmentReceipt(fileID: attachment.id) {

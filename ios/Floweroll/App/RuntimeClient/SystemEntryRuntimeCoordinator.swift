@@ -487,6 +487,16 @@ actor SystemEntryRuntimeCoordinator {
             submissionID: submissionID
         )
         await scheduleRecovery(reason: "home_in_app_submission_persisted")
+        // The outbox is already durable above. Draft selection may have started
+        // a system background upload, but iOS can defer those bytes for minutes.
+        // An explicit foreground Send takes over unfinished bytes on the same
+        // resumable file ID; recovery still owns the submission if this stops.
+        for attachment in attachments {
+            _ = try await client.uploadTaskAttachment(
+                attachment,
+                executionMode: .immediateResumable
+            )
+        }
         let task = try await client.submitExisting(pending, pendingStore: pendingStore)
         let acceptedAttachmentIDs = Set(attachments.map(\.id))
         await MainActor.run {

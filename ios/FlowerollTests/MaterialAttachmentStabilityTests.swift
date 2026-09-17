@@ -264,6 +264,33 @@ final class MaterialAttachmentStabilityTests: XCTestCase {
         XCTAssertTrue(remaining.isEmpty)
     }
 
+    func testImmediateRemoteUploadUsesForegroundResumableHTTP() async throws {
+        let attachment = try makeAttachment(
+            id: "foreground-immediate-file",
+            bytes: Data(repeating: 0x46, count: 192 * 1024)
+        )
+        defer { try? FileManager.default.removeItem(at: try attachment.fileURL()) }
+        let state = MaterialMockState()
+        MaterialURLProtocol.handler = { request in
+            try Self.handleFileRequest(request, attachment: attachment, state: state)
+        }
+        let client = FlowerollHostClient(
+            baseURL: URL(string: "https://host.example")!,
+            session: makeSession(),
+            bearerToken: "test-only-token"
+        )
+
+        let receipt = try await client.uploadTaskAttachment(
+            attachment,
+            executionMode: .immediateResumable
+        )
+
+        XCTAssertEqual(receipt.id, attachment.id)
+        XCTAssertEqual(receipt.sha256, attachment.sha256)
+        XCTAssertGreaterThan(state.withLock { state.patchCount }, 0)
+        XCTAssertTrue(state.withLock { state.hostHasFile })
+    }
+
     func testAckLostButHostHasFileUsesReadbackWithoutRetransmit() async throws {
         let attachment = try makeAttachment(id: "ack-lost-file", bytes: Data("ack lost fixture".utf8))
         defer { try? FileManager.default.removeItem(at: try attachment.fileURL()) }

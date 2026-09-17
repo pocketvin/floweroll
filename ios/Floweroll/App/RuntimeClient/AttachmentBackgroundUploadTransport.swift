@@ -351,6 +351,37 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
         }
     }
 
+    /// Retire the system-owned byte transfer for one exact file before a
+    /// latency-sensitive foreground send takes over the same Host resumable
+    /// offset. Host-confirmed offset remains the byte truth throughout.
+    func handoffToImmediateUpload(attachmentID: String) async {
+        finish(attachmentID: attachmentID, result: .failure(CancellationError()))
+        let matchingTasks: [URLSessionTask] = await withCheckedContinuation { continuation in
+            session.getAllTasks { tasks in
+                continuation.resume(returning: tasks.filter {
+                    BackgroundAttachmentUploadJob.decode($0.taskDescription)?.attachment.id == attachmentID
+                })
+            }
+        }
+        for task in matchingTasks {
+            if let job = BackgroundAttachmentUploadJob.decode(task.taskDescription) {
+                removeBodyFile(job)
+            }
+            // A late delegate completion must not schedule another background
+            // chunk after the foreground lane has taken ownership.
+            task.taskDescription = nil
+            task.cancel()
+        }
+        removeTransferDirectory(attachmentID: attachmentID)
+
+        // URLSession cancellation is asynchronous. Keep this bounded; if one
+        // request still races, resumable PATCH reconciliation advances from the
+        // Host-confirmed offset without changing file identity.
+        for _ in 0..<20 where matchingTasks.contains(where: { $0.state != .completed }) {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
     func urlSession(
         _ session: URLSession,
         dataTask: URLSessionDataTask,

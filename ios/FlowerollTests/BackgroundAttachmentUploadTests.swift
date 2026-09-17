@@ -136,6 +136,32 @@ final class BackgroundAttachmentUploadTests: XCTestCase {
         XCTAssertTrue(transport.contains("job.operation == .begin"), "legacy zero-byte background begin tasks must be retired during upgrade")
     }
 
+    func testHomeExplicitSendPersistsBeforeImmediateUploadAndAdmission() throws {
+        let root = try ProductSourceFiles.iosRoot().appendingPathComponent("Floweroll/App/RuntimeClient")
+        let coordinator = try String(
+            contentsOf: root.appendingPathComponent("SystemEntryRuntimeCoordinator.swift"),
+            encoding: .utf8
+        )
+        let client = try String(
+            contentsOf: root.appendingPathComponent("FlowerollHostClient.swift"),
+            encoding: .utf8
+        )
+        let transport = try String(
+            contentsOf: root.appendingPathComponent("AttachmentBackgroundUploadTransport.swift"),
+            encoding: .utf8
+        )
+        let homeSubmit = try XCTUnwrap(coordinator.range(of: "private func submitHomeTask("))
+        let tail = String(coordinator[homeSubmit.lowerBound...])
+        let persisted = try XCTUnwrap(tail.range(of: "pendingStore.create("))
+        let immediate = try XCTUnwrap(tail.range(of: "executionMode: .immediateResumable"))
+        let admit = try XCTUnwrap(tail.range(of: "client.submitExisting(pending"))
+        XCTAssertLessThan(persisted.lowerBound, immediate.lowerBound)
+        XCTAssertLessThan(immediate.lowerBound, admit.lowerBound)
+        XCTAssertTrue(client.contains("handoffToImmediateUpload("))
+        XCTAssertTrue(transport.contains("task.taskDescription = nil"))
+        XCTAssertTrue(transport.contains("task.cancel()"))
+    }
+
     func testProductSourceUsesBackgroundFileUploadWithoutBGCPT() throws {
         let appRoot = try ProductSourceFiles.iosRoot().appendingPathComponent("Floweroll/App")
         let transport = try String(
