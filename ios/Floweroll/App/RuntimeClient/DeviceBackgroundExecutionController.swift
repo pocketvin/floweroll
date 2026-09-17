@@ -273,6 +273,24 @@ enum ContinuedTaskStableStatePolicy {
         guard !["completed", "failed", "cancelled"].contains(normalized) else { return false }
         return hasPendingInteraction || normalized == "needs_user"
     }
+
+    /// A pending interaction does not imply that the whole Task is blocked.
+    /// Host may intentionally keep a Task `active` while already-authorized work
+    /// continues and a separate clarification remains unanswered. Release the
+    /// iPhone execution owner only when Host lifecycle truth says execution is
+    /// actually waiting on / blocked by the user.
+    static func shouldReleaseForPendingInteraction(
+        status: String,
+        hasPendingInteraction: Bool
+    ) -> Bool {
+        guard hasPendingInteraction else { return false }
+        switch status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "waiting", "needs_user", "blocked":
+            return true
+        default:
+            return false
+        }
+    }
 }
 
 
@@ -1137,8 +1155,10 @@ final class DeviceBackgroundExecutionController {
         ) {
             return false
         }
-        if hasPendingInteraction,
-           !["completed", "failed", "cancelled"].contains(status) {
+        if ContinuedTaskStableStatePolicy.shouldReleaseForPendingInteraction(
+            status: status,
+            hasPendingInteraction: hasPendingInteraction
+        ) {
             untrack(taskID)
             return true
         }

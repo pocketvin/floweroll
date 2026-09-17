@@ -416,6 +416,33 @@ final class SystemEntryOwnershipTests: XCTestCase {
         ))
     }
 
+    func testActiveTaskKeepsExecutionOwnerWhileAnotherClarificationRemainsPending() {
+        XCTAssertFalse(ContinuedTaskStableStatePolicy.shouldReleaseForPendingInteraction(
+            status: "active",
+            hasPendingInteraction: true
+        ))
+        XCTAssertTrue(ContinuedTaskStableStatePolicy.shouldReleaseForPendingInteraction(
+            status: "waiting",
+            hasPendingInteraction: true
+        ))
+        XCTAssertTrue(ContinuedTaskStableStatePolicy.shouldReleaseForPendingInteraction(
+            status: "needs_user",
+            hasPendingInteraction: true
+        ))
+        XCTAssertTrue(ContinuedTaskStableStatePolicy.shouldReleaseForPendingInteraction(
+            status: "blocked",
+            hasPendingInteraction: true
+        ))
+        XCTAssertFalse(ContinuedTaskStableStatePolicy.shouldReleaseForPendingInteraction(
+            status: "active",
+            hasPendingInteraction: false
+        ))
+        XCTAssertFalse(ContinuedTaskStableStatePolicy.shouldReleaseForPendingInteraction(
+            status: "completed",
+            hasPendingInteraction: true
+        ))
+    }
+
     func testTaskScopedIntentReservesBeforeBGCPTAndReleasesOnBothOutcomes() throws {
         let sourceURL = try ProductSourceFiles.iosRoot()
             .appendingPathComponent("Floweroll/App/FlowerollIntents.swift")
