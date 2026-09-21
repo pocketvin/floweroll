@@ -13,8 +13,10 @@ from floweroll_host.capability_registry import (
     RegisteredCapability,
 )
 from floweroll_host.execution_runtime import ExecutionRuntime
+from floweroll_host.function_execution_worker import FunctionExecutionWorker
+from floweroll_host.function_tool_adapter import FunctionToolAdapter
 from floweroll_host.mcp_adapter import MCPReadToolAdapter
-from floweroll_host.mcp_driver import MCPDriver, MCPServerConfig
+from floweroll_host.mcp_driver import MCPDriver, MCPFinalResult, MCPServerConfig
 from floweroll_host.mcp_execution_worker import MCPExecutionWorker
 from floweroll_host.planner_contracts import CapabilitySpec
 from floweroll_host.runtime_supervisor import RuntimeSupervisor
@@ -312,6 +314,312 @@ class MCPRuntimeTests(unittest.TestCase):
             self.assertEqual(len(store.action_attempts("mcp-supervisor-action")), 1)
         finally:
             supervisor.stop()
+            worker.close()
+
+    def test_slow_mcp_call_does_not_block_or_duplicate_independent_mcp_work(self) -> None:
+        registry = CapabilityRegistry()
+        spec = CapabilitySpec(
+            name="test.mcp.read",
+            description="测试并发 MCP 读取",
+            arguments_schema={
+                "type": "object",
+                "properties": {"keywords": {"type": "string"}},
+                "required": ["keywords"],
+                "additionalProperties": False,
+            },
+        )
+        registry.register(
+            RegisteredCapability(
+                spec=spec,
+                adapter=MCPReadToolAdapter(
+                    capability_id=spec.name,
+                    server_id="fixture",
+                    tool_name="search",
+                ),
+                source=CapabilitySourceTarget(
+                    kind="mcp",
+                    server_id="fixture",
+                    tool_name="search",
+                ),
+                tags=("test",),
+                loading="always_visible",
+            )
+        )
+
+        slow_started = threading.Event()
+        release_slow = threading.Event()
+        calls: dict[str, int] = {}
+
+        class BlockingDriver:
+            def call_tool(self, name, arguments):
+                keyword = str(arguments["keywords"])
+                calls[keyword] = calls.get(keyword, 0) + 1
+                if keyword == "slow":
+                    slow_started.set()
+                    if not release_slow.wait(timeout=2):
+                        raise TimeoutError("test slow MCP call was not released")
+                return MCPFinalResult(
+                    content=[{"type": "text", "text": keyword}],
+                    structured_content={"keyword": keyword},
+                    is_error=False,
+                )
+
+        store = Storage(":memory:")
+        for task_id, keyword in (
+            ("a-slow-mcp", "slow"),
+            ("b-fast-mcp", "fast"),
+        ):
+            store.create_task(task_id, keyword, "unit", {}, status="active")
+            store.create_action(
+                action_id=task_id + "-action",
+                task_id=task_id,
+                step_index=1,
+                action_type=spec.name,
+                payload={"keywords": keyword},
+                expected={},
+                idempotency_key=task_id + ":1",
+                on_verified="COMPLETE",
+            )
+
+        execution = ExecutionRuntime(store, registry.execution_adapters())
+        worker = MCPExecutionWorker(
+            execution,
+            registry,
+            {"fixture": BlockingDriver()},
+            max_workers=2,
+        )
+        try:
+            started = time.monotonic()
+            self.assertEqual(worker.sweep_once(), [])
+            self.assertLess(time.monotonic() - started, 0.2)
+            self.assertTrue(slow_started.wait(timeout=1))
+
+            deadline = time.monotonic() + 1
+            while time.monotonic() < deadline:
+                if store.get_task("b-fast-mcp")["status"] == "completed":
+                    break
+                time.sleep(0.01)
+            self.assertEqual(store.get_task("b-fast-mcp")["status"], "completed")
+            self.assertNotEqual(store.get_task("a-slow-mcp")["status"], "completed")
+
+            for _ in range(3):
+                worker.sweep_once()
+            self.assertEqual(calls.get("slow"), 1, "in-flight MCP Task must not be redispatched")
+
+            release_slow.set()
+            deadline = time.monotonic() + 1
+            while time.monotonic() < deadline:
+                if store.get_task("a-slow-mcp")["status"] == "completed":
+                    break
+                time.sleep(0.01)
+            self.assertEqual(store.get_task("a-slow-mcp")["status"], "completed")
+        finally:
+            release_slow.set()
+            worker.close()
+
+    def test_slow_mcp_lane_does_not_block_function_lane_in_same_supervisor(self) -> None:
+        registry = CapabilityRegistry()
+        mcp_spec = CapabilitySpec(
+            name="test.mcp.slow",
+            description="测试慢 MCP",
+            arguments_schema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+        )
+        registry.register(
+            RegisteredCapability(
+                spec=mcp_spec,
+                adapter=MCPReadToolAdapter(
+                    capability_id=mcp_spec.name,
+                    server_id="fixture",
+                    tool_name="slow",
+                ),
+                source=CapabilitySourceTarget(
+                    kind="mcp",
+                    server_id="fixture",
+                    tool_name="slow",
+                ),
+                tags=("test",),
+                loading="always_visible",
+            )
+        )
+        function_spec = CapabilitySpec(
+            name="test.function.fast",
+            description="测试快 Function",
+            arguments_schema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+        )
+        registry.register(
+            RegisteredCapability(
+                spec=function_spec,
+                adapter=FunctionToolAdapter(
+                    capability_id=function_spec.name,
+                    source_kind="host_internal",
+                    read_only=True,
+                ),
+                source=CapabilitySourceTarget(
+                    kind="host_internal",
+                    tool_name=function_spec.name,
+                ),
+                tags=("test",),
+                loading="always_visible",
+            )
+        )
+
+        slow_started = threading.Event()
+        release_slow = threading.Event()
+
+        class SlowDriver:
+            def call_tool(self, name, arguments):
+                slow_started.set()
+                if not release_slow.wait(timeout=2):
+                    raise TimeoutError("test slow MCP lane was not released")
+                return MCPFinalResult(
+                    content=[{"type": "text", "text": "slow done"}],
+                    structured_content={"ok": True},
+                    is_error=False,
+                )
+
+        store = Storage(":memory:")
+        for task_id, capability in (
+            ("a-cross-slow", mcp_spec.name),
+            ("b-cross-fast", function_spec.name),
+        ):
+            store.create_task(task_id, capability, "unit", {}, status="active")
+            store.create_action(
+                action_id=task_id + "-action",
+                task_id=task_id,
+                step_index=1,
+                action_type=capability,
+                payload={},
+                expected={},
+                idempotency_key=task_id + ":1",
+                on_verified="COMPLETE",
+            )
+
+        execution = ExecutionRuntime(store, registry.execution_adapters())
+        mcp_worker = MCPExecutionWorker(execution, registry, {"fixture": SlowDriver()})
+        function_worker = FunctionExecutionWorker(
+            execution,
+            registry,
+            {function_spec.name: lambda _: {"value": "fast"}},
+        )
+        supervisor = RuntimeSupervisor(
+            store,
+            None,
+            execution_workers=[mcp_worker, function_worker],
+            poll_interval_seconds=0.02,
+        )
+        supervisor.start()
+        try:
+            self.assertTrue(slow_started.wait(timeout=1))
+            deadline = time.monotonic() + 1
+            while time.monotonic() < deadline:
+                if store.get_task("b-cross-fast")["status"] == "completed":
+                    break
+                time.sleep(0.01)
+            self.assertEqual(store.get_task("b-cross-fast")["status"], "completed")
+            self.assertNotEqual(store.get_task("a-cross-slow")["status"], "completed")
+
+            release_slow.set()
+            deadline = time.monotonic() + 1
+            while time.monotonic() < deadline:
+                if store.get_task("a-cross-slow")["status"] == "completed":
+                    break
+                time.sleep(0.01)
+            self.assertEqual(store.get_task("a-cross-slow")["status"], "completed")
+        finally:
+            release_slow.set()
+            supervisor.stop()
+            mcp_worker.close()
+            function_worker.close()
+
+    def test_close_is_bounded_while_running_mcp_future_finishes_naturally(self) -> None:
+        registry = CapabilityRegistry()
+        spec = CapabilitySpec(
+            name="test.mcp.shutdown",
+            description="测试 MCP shutdown drain",
+            arguments_schema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+        )
+        registry.register(
+            RegisteredCapability(
+                spec=spec,
+                adapter=MCPReadToolAdapter(
+                    capability_id=spec.name,
+                    server_id="fixture",
+                    tool_name="shutdown",
+                ),
+                source=CapabilitySourceTarget(
+                    kind="mcp",
+                    server_id="fixture",
+                    tool_name="shutdown",
+                ),
+                tags=("test",),
+                loading="always_visible",
+            )
+        )
+
+        entered = threading.Event()
+        release = threading.Event()
+
+        class BlockingDriver:
+            def call_tool(self, name, arguments):
+                entered.set()
+                if not release.wait(timeout=3):
+                    raise TimeoutError("shutdown test did not release MCP")
+                return MCPFinalResult(
+                    content=[{"type": "text", "text": "done"}],
+                    structured_content={"ok": True},
+                    is_error=False,
+                )
+
+        store = Storage(":memory:")
+        store.create_task("mcp-shutdown", "shutdown", "unit", {}, status="active")
+        store.create_action(
+            action_id="mcp-shutdown-action",
+            task_id="mcp-shutdown",
+            step_index=1,
+            action_type=spec.name,
+            payload={},
+            expected={},
+            idempotency_key="mcp-shutdown:1",
+            on_verified="COMPLETE",
+        )
+        worker = MCPExecutionWorker(
+            ExecutionRuntime(store, registry.execution_adapters()),
+            registry,
+            {"fixture": BlockingDriver()},
+        )
+        try:
+            self.assertEqual(worker.sweep_once(), [])
+            self.assertTrue(entered.wait(timeout=1))
+            started = time.monotonic()
+            self.assertFalse(worker.close(timeout_seconds=0.02))
+            self.assertLess(time.monotonic() - started, 0.5)
+
+            release.set()
+            deadline = time.monotonic() + 1
+            while time.monotonic() < deadline:
+                if store.get_task("mcp-shutdown")["status"] == "completed":
+                    break
+                time.sleep(0.01)
+            self.assertEqual(store.get_task("mcp-shutdown")["status"], "completed")
+            self.assertTrue(worker.close(timeout_seconds=0.2))
+        finally:
+            release.set()
+            worker.close(timeout_seconds=0.2)
 
     def test_input_required_resumes_same_attempt(self) -> None:
         driver = self.driver(server_id="fixture")

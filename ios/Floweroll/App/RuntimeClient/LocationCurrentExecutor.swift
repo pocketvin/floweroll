@@ -48,7 +48,7 @@ enum LocationCurrentVerifier {
     }
 }
 
-private enum LocationOneShotResult: Sendable {
+enum LocationOneShotResult: Sendable {
     case location(
         LocationCurrentSample,
         authorizationStatus: CLAuthorizationStatus,
@@ -63,6 +63,7 @@ private enum LocationOneShotResult: Sendable {
         authorizationStatus: CLAuthorizationStatus,
         accuracyAuthorization: CLAccuracyAuthorization
     )
+    case cancelled
 }
 
 private struct LocationEnvironmentSnapshot: Sendable {
@@ -152,18 +153,19 @@ enum LocationCurrentEnvironmentPolicy {
 }
 
 @MainActor
-private final class CoreLocationOneShotClient: NSObject, @preconcurrency CLLocationManagerDelegate {
+final class CoreLocationOneShotClient: NSObject, @preconcurrency CLLocationManagerDelegate {
     private let manager = CLLocationManager()
     private var continuation: CheckedContinuation<LocationOneShotResult, Never>?
     private var timeoutTask: Task<Void, Never>?
     private var finished = false
+    private var cancellationRequested = false
 
     override init() {
         super.init()
         manager.delegate = self
     }
 
-    static func environment() -> LocationEnvironmentSnapshot {
+    fileprivate static func environment() -> LocationEnvironmentSnapshot {
         let manager = CLLocationManager()
         return LocationEnvironmentSnapshot(
             isForeground: UIApplication.shared.applicationState == .active,
@@ -181,19 +183,29 @@ private final class CoreLocationOneShotClient: NSObject, @preconcurrency CLLocat
         // one fresh location inside its existing user-started background
         // execution window; Core Location must not become a second long-lived
         // background owner.
-        return await withCheckedContinuation { continuation in
-            self.continuation = continuation
-            manager.requestLocation()
-            timeoutTask = Task { @MainActor [weak self] in
-                let nanos = UInt64(max(0, timeoutSeconds) * 1_000_000_000)
-                try? await Task.sleep(nanoseconds: nanos)
-                guard !Task.isCancelled else { return }
-                self?.finish(
-                    .timeout(
-                        authorizationStatus: self?.manager.authorizationStatus ?? .notDetermined,
-                        accuracyAuthorization: self?.manager.accuracyAuthorization ?? .reducedAccuracy
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                self.continuation = continuation
+                if Task.isCancelled || cancellationRequested {
+                    finish(.cancelled)
+                    return
+                }
+                manager.requestLocation()
+                timeoutTask = Task { @MainActor [weak self] in
+                    let nanos = UInt64(max(0, timeoutSeconds) * 1_000_000_000)
+                    try? await Task.sleep(nanoseconds: nanos)
+                    guard !Task.isCancelled else { return }
+                    self?.finish(
+                        .timeout(
+                            authorizationStatus: self?.manager.authorizationStatus ?? .notDetermined,
+                            accuracyAuthorization: self?.manager.accuracyAuthorization ?? .reducedAccuracy
+                        )
                     )
-                )
+                }
+            }
+        } onCancel: { [weak self] in
+            Task { @MainActor in
+                self?.cancel()
             }
         }
     }
@@ -232,6 +244,12 @@ private final class CoreLocationOneShotClient: NSObject, @preconcurrency CLLocat
                 accuracyAuthorization: manager.accuracyAuthorization
             )
         )
+    }
+
+    private func cancel() {
+        cancellationRequested = true
+        guard continuation != nil else { return }
+        finish(.cancelled)
     }
 
     private func finish(_ result: LocationOneShotResult) {
@@ -348,6 +366,9 @@ actor LocationCurrentExecutor: DeviceCapabilityExecutor {
                 authorizationStatus: authorizationStatus,
                 accuracyAuthorization: accuracyAuthorization
             )
+
+        case .cancelled:
+            throw CancellationError()
 
         case let .timeout(authorizationStatus, accuracyAuthorization):
             return Self.failure(

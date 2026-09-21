@@ -559,6 +559,7 @@ actor ContactsCreateRecoveryStore {
 
     private let fileURL: URL
     private var records: [String: ContactsCreateRecoveryRecord]
+    private var loadFailed = false
 
     init(fileURL: URL? = nil) {
         if let fileURL {
@@ -569,20 +570,28 @@ actor ContactsCreateRecoveryStore {
             try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
             self.fileURL = base.appendingPathComponent("contacts-create-recovery.json")
         }
-        if let data = try? Data(contentsOf: self.fileURL) {
+        guard FileManager.default.fileExists(atPath: self.fileURL.path) else {
+            records = [:]
+            return
+        }
+        do {
+            let data = try Data(contentsOf: self.fileURL)
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            records = (try? decoder.decode([String: ContactsCreateRecoveryRecord].self, from: data)) ?? [:]
-        } else {
+            records = try decoder.decode([String: ContactsCreateRecoveryRecord].self, from: data)
+        } catch {
             records = [:]
+            loadFailed = true
         }
     }
 
-    func record(for attemptID: String) -> ContactsCreateRecoveryRecord? {
-        records[attemptID]
+    func record(for attemptID: String) throws -> ContactsCreateRecoveryRecord? {
+        try assertHealthy()
+        return records[attemptID]
     }
 
     func prepare(attemptID: String, contactID: String, desiredDigest: String) throws {
+        try assertHealthy()
         if let existing = records[attemptID] {
             guard existing.contactID == contactID, existing.desiredDigest == desiredDigest else {
                 throw ContactsMutationClientError.ambiguousReadback("联系人创建恢复标识与当前请求不一致。")
@@ -600,6 +609,14 @@ actor ContactsCreateRecoveryStore {
             records = Dictionary(uniqueKeysWithValues: keep.map { ($0.attemptID, $0) })
         }
         try persist()
+    }
+
+    private func assertHealthy() throws {
+        guard !loadFailed else {
+            throw ContactsMutationClientError.ambiguousReadback(
+                "联系人创建恢复记录无法读取；为避免重复创建，不会继续执行。"
+            )
+        }
     }
 
     private func persist() throws {
@@ -806,7 +823,7 @@ actor ContactsCreateExecutor: DeviceCapabilityExecutor {
         }
         let desiredDigest = ContactsRevisionCodec.desiredDigest(arguments.desired)
 
-        if let existing = await recoveryStore.record(for: dispatch.attemptID) {
+        if let existing = try await recoveryStore.record(for: dispatch.attemptID) {
             guard existing.desiredDigest == desiredDigest else {
                 throw ContactsMutationClientError.ambiguousReadback("同一联系人创建 Attempt 的恢复内容发生冲突。")
             }
@@ -837,8 +854,8 @@ actor ContactsCreateExecutor: DeviceCapabilityExecutor {
             return ContactsMutationResultBuilder.create(readback, authorization: authorization)
         } catch let error as ContactsMutationClientError {
             switch error {
-            case let .nativeSaveFailed(message):
-                return Self.failure(.saveFailed, message)
+            case .nativeSaveFailed:
+                throw error
             case .targetNotAccessible:
                 return Self.failure(.targetNotAccessible, error.localizedDescription)
             case .targetStale:
@@ -855,9 +872,18 @@ actor ContactsCreateExecutor: DeviceCapabilityExecutor {
         _ dispatch: DeviceActionDispatch,
         journalEntry: DeviceActionJournalEntry
     ) async throws -> DeviceReconciliationResult {
-        guard let arguments = ContactsCreateArguments(dispatch.payload),
-              let record = await recoveryStore.record(for: dispatch.attemptID),
-              record.desiredDigest == ContactsRevisionCodec.desiredDigest(arguments.desired) else {
+        guard let arguments = ContactsCreateArguments(dispatch.payload) else {
+            return .stillUnknown("联系人创建已越过副作用边界，但没有足够的精确恢复标识。")
+        }
+        let record: ContactsCreateRecoveryRecord?
+        do {
+            record = try await recoveryStore.record(for: dispatch.attemptID)
+        } catch {
+            return .stillUnknown("联系人创建恢复记录无法读取；不会自动再次创建。")
+        }
+        guard let record,
+              record.desiredDigest == ContactsRevisionCodec.desiredDigest(arguments.desired)
+        else {
             return .stillUnknown("联系人创建已越过副作用边界，但没有足够的精确恢复标识。")
         }
         let authorization = await client.authorizationStatus()
@@ -952,8 +978,8 @@ actor ContactsUpdateExecutor: DeviceCapabilityExecutor {
                 return Self.failure(.targetStale, error.localizedDescription)
             case .updateUnsupported:
                 return Self.failure(.updateUnsupported, error.localizedDescription)
-            case let .nativeSaveFailed(message):
-                return Self.failure(.saveFailed, message)
+            case .nativeSaveFailed:
+                throw error
             default:
                 throw error
             }

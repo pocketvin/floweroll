@@ -29,11 +29,22 @@ actor AlarmReadExecutor: DeviceCapabilityExecutor {
     }
 
     func preflight(_ dispatch: DeviceActionDispatch) async throws -> DeviceExecutionResult? {
-        guard AlarmReadArguments.parse(dispatch.payload) != nil else {
+        guard let arguments = AlarmReadArguments.parse(dispatch.payload) else {
             return alarmFailure(.invalidArguments)
+        }
+        guard let ownershipStore else {
+            return alarmFailure(.ownershipStoreUnavailable)
         }
         if let permission = alarmPermissionFailure(await nativeStore.authorizationStatus()) {
             return permission
+        }
+        do {
+            guard await ownershipStore.record(alarmID: arguments.alarmID) != nil else {
+                let nativeExists = try await nativeStore.alarms().contains { $0.id == arguments.alarmID }
+                return targetFailure(alarmID: arguments.alarmID, nativeExists: nativeExists)
+            }
+        } catch {
+            return alarmFailure(.readFailed)
         }
         return nil
     }
@@ -42,7 +53,14 @@ actor AlarmReadExecutor: DeviceCapabilityExecutor {
         guard let arguments = AlarmReadArguments.parse(dispatch.payload) else {
             return alarmFailure(.invalidArguments)
         }
+        guard let ownershipStore else {
+            return alarmFailure(.ownershipStoreUnavailable)
+        }
         do {
+            guard await ownershipStore.record(alarmID: arguments.alarmID) != nil else {
+                let nativeExists = try await nativeStore.alarms().contains { $0.id == arguments.alarmID }
+                return targetFailure(alarmID: arguments.alarmID, nativeExists: nativeExists)
+            }
             guard let snapshot = try await AlarmReadbackService.read(
                 alarmID: arguments.alarmID,
                 nativeStore: nativeStore,
@@ -69,6 +87,9 @@ actor AlarmReadExecutor: DeviceCapabilityExecutor {
         guard let arguments = AlarmReadArguments.parse(dispatch.payload) else {
             return .completed(alarmFailure(.invalidArguments))
         }
+        guard let ownershipStore else {
+            return .stillUnknown(AlarmFailureCode.ownershipStoreUnavailable.rawValue)
+        }
         let authorization = await nativeStore.authorizationStatus()
         guard authorization == .authorized else {
             return .completed(
@@ -77,6 +98,12 @@ actor AlarmReadExecutor: DeviceCapabilityExecutor {
             )
         }
         do {
+            guard await ownershipStore.record(alarmID: arguments.alarmID) != nil else {
+                let nativeExists = try await nativeStore.alarms().contains { $0.id == arguments.alarmID }
+                return .completed(
+                    targetFailure(alarmID: arguments.alarmID, nativeExists: nativeExists)
+                )
+            }
             guard let snapshot = try await AlarmReadbackService.read(
                 alarmID: arguments.alarmID,
                 nativeStore: nativeStore,
@@ -98,6 +125,13 @@ actor AlarmReadExecutor: DeviceCapabilityExecutor {
                 )
             )
         }
+    }
+
+    private func targetFailure(alarmID: UUID, nativeExists: Bool) -> DeviceExecutionResult {
+        alarmFailure(
+            nativeExists ? .foreignTarget : .unknownTarget,
+            extra: ["alarm_id": .string(alarmID.uuidString)]
+        )
     }
 
     private static func result(

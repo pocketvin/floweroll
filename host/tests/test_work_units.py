@@ -5,9 +5,11 @@ import tempfile
 import threading
 import subprocess
 import sys
+import time
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 from floweroll_host.amap_webservice import register_amap_webservice_capabilities
 from floweroll_host.capability_registry import CapabilityRegistry, CapabilitySourceTarget, RegisteredCapability
@@ -60,6 +62,57 @@ class WorkUnitTests(unittest.TestCase):
         aid = self.create_action(units, retry)
         self.app.function_worker.run_once(self.task)
         return self.store.action_attempts(aid)[0]
+
+    def test_host_close_defers_asset_store_close_until_running_function_drains(self):
+        entered = threading.Event()
+        release = threading.Event()
+        asset_read = threading.Event()
+
+        def blocking_fetch(args):
+            entered.set()
+            if not release.wait(timeout=3):
+                raise TimeoutError("shutdown test did not release function")
+            self.assets.manifest(self.task)
+            asset_read.set()
+            return {"url": args["url"], "status": 200, "text": "finished after close"}
+
+        self.app.function_worker.executors["web.fetch"] = blocking_fetch
+        action_id = uuid.uuid4().hex
+        self.store.create_action(
+            action_id=action_id,
+            task_id=self.task,
+            step_index=1,
+            action_type="web.fetch",
+            payload={"url": "https://example.com/shutdown"},
+            expected={},
+            idempotency_key=action_id,
+            on_verified="COMPLETE",
+        )
+        self.assertEqual(self.app.function_worker.sweep_once(), [])
+        self.assertTrue(entered.wait(timeout=1))
+
+        try:
+            with patch.object(self.assets, "close", wraps=self.assets.close) as close_assets:
+                started = time.monotonic()
+                self.app.close()
+                self.assertLess(time.monotonic() - started, 2.0)
+                self.assertEqual(
+                    close_assets.call_count,
+                    0,
+                    "Host must not close the asset manifest while a Function still owns it",
+                )
+
+                release.set()
+                self.assertTrue(asset_read.wait(timeout=1))
+                deadline = time.monotonic() + 1
+                while time.monotonic() < deadline and close_assets.call_count == 0:
+                    time.sleep(0.01)
+                self.assertEqual(close_assets.call_count, 1)
+
+            attempt = self.store.action_attempts(action_id)[0]
+            self.assertEqual(attempt["latest_outcome"], "SUCCESS")
+        finally:
+            release.set()
 
     def test_independent_work_overlaps_and_dependencies_wait_for_verified_receipts(self):
         barrier = threading.Barrier(2, timeout=4)

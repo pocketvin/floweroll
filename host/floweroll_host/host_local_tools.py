@@ -319,6 +319,7 @@ def register_host_local_capabilities(
                 capability_id="artifact.write_text",
                 source_kind="host_local",
                 read_only=False,
+                replay_safe=True,
             ),
             tools.write_text,
             ("host", "file", "write", "artifact"),

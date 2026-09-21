@@ -465,10 +465,17 @@ enum AlarmSettingsMutationIntentState: String, Codable, Equatable, Sendable {
 
 
 enum AlarmSettingsMutationResolution: String, Codable, Equatable, Sendable {
+    case failed
     case completed
     case definitelyNotStarted = "definitely_not_started"
 }
 
+
+enum AlarmReplacementPhase: String, Codable, Equatable, Sendable {
+    case removingOriginal
+    case schedulingReplacement
+    case restoringOriginal
+}
 
 struct AlarmSettingsMutationIntent: Codable, Equatable, Sendable {
     let mutationID: String
@@ -486,6 +493,9 @@ struct AlarmSettingsMutationIntent: Codable, Equatable, Sendable {
     var lastObservedNativeState: AlarmNativeState?
     var lastObservedAt: Date?
     var detail: String?
+    // Optional for compatibility with installed pre-transaction ledgers.
+    var replacementPhase: AlarmReplacementPhase? = nil
+    var replacementAttempts: Int? = nil
 }
 
 
@@ -588,8 +598,7 @@ actor AlarmOwnershipStore {
             existing.sound = sound
             existing.lastNativeState = nativeState
             existing.lastObservedAt = acceptedAt
-            records[alarmID] = existing
-            try persist()
+            try commit(existing)
             return existing
         }
         let record = AlarmOwnershipRecord(
@@ -612,8 +621,7 @@ actor AlarmOwnershipStore {
             pendingSettingsMutation: nil,
             lastSettingsMutationOutcome: nil
         )
-        records[alarmID] = record
-        try persist()
+        try commit(record)
         return record
     }
 
@@ -642,8 +650,7 @@ actor AlarmOwnershipStore {
         record.lastMutationActionID = actionID
         record.cancelledAt = nil
         record.cancelledByActionID = nil
-        records[alarmID] = record
-        try persist()
+        try commit(record)
         return record
     }
 
@@ -664,8 +671,7 @@ actor AlarmOwnershipStore {
         } else if !isMissing, record.lifecycle == .missing {
             record.lifecycle = .accepted
         }
-        records[alarmID] = record
-        try persist()
+        try commit(record)
         return record
     }
 
@@ -686,8 +692,7 @@ actor AlarmOwnershipStore {
         record.lastMutationAt = now
         record.lastMutationTaskID = taskID
         record.lastMutationActionID = actionID
-        records[alarmID] = record
-        try persist()
+        try commit(record)
         return record
     }
 
@@ -709,8 +714,7 @@ actor AlarmOwnershipStore {
         record.lastMutationActionID = actionID
         record.cancelledAt = now
         record.cancelledByActionID = actionID
-        records[alarmID] = record
-        try persist()
+        try commit(record)
         return record
     }
 
@@ -723,8 +727,7 @@ actor AlarmOwnershipStore {
         else {
             throw AlarmOwnershipStoreError.recordNotRemovable
         }
-        records.removeValue(forKey: alarmID)
-        try persist()
+        try removeRecord(alarmID: alarmID)
     }
 
     func pendingSettingsMutations() -> [AlarmSettingsMutationIntent] {
@@ -779,8 +782,7 @@ actor AlarmOwnershipStore {
             detail: nil
         )
         record.pendingSettingsMutation = intent
-        records[alarmID] = record
-        try persist()
+        try commit(record)
         return intent
     }
 
@@ -803,8 +805,7 @@ actor AlarmOwnershipStore {
         record.pendingSettingsMutation = pending
         record.lastObservedAt = now
         record.lastNativeState = nativeState
-        records[alarmID] = record
-        try persist()
+        try commit(record)
         return pending
     }
 
@@ -830,8 +831,7 @@ actor AlarmOwnershipStore {
             detail: detail
         )
         record.pendingSettingsMutation = nil
-        records[alarmID] = record
-        try persist()
+        try commit(record)
         return record
     }
 
@@ -869,8 +869,7 @@ actor AlarmOwnershipStore {
             detail: nil
         )
         record.pendingSettingsMutation = nil
-        records[alarmID] = record
-        try persist()
+        try commit(record)
         return record
     }
 
@@ -901,8 +900,7 @@ actor AlarmOwnershipStore {
             detail: nil
         )
         record.pendingSettingsMutation = nil
-        records[alarmID] = record
-        try persist()
+        try commit(record)
         return record
     }
 
@@ -932,14 +930,76 @@ actor AlarmOwnershipStore {
             detail: nil
         )
         record.pendingSettingsMutation = nil
-        records[alarmID] = record
-        try persist()
+        try commit(record)
         return record
     }
 
-    private func persist() throws {
+    @discardableResult
+    func advanceReplacement(
+        alarmID: UUID, mutationID: String, phase: AlarmReplacementPhase,
+        countAttempt: Bool = false
+    ) throws -> AlarmSettingsMutationIntent {
+        guard var record = records[alarmID], record.lifecycle != .cancelled,
+              var intent = record.pendingSettingsMutation,
+              intent.mutationID == mutationID, intent.operation == .update
+        else { throw AlarmOwnershipStoreError.settingsMutationIdentityConflict }
+        if intent.replacementPhase != phase { intent.replacementAttempts = 0 }
+        intent.replacementPhase = phase
+        if countAttempt {
+            guard (intent.replacementAttempts ?? 0) < 3 else {
+                throw AlarmOwnershipStoreError.settingsMutationIdentityConflict
+            }
+            intent.replacementAttempts = (intent.replacementAttempts ?? 0) + 1
+        }
+        record.pendingSettingsMutation = intent
+        try commit(record)
+        return intent
+    }
+
+    @discardableResult
+    func finishReplacementFailure(
+        alarmID: UUID, mutationID: String, nativeState: AlarmNativeState?,
+        detail: String, now: Date = Date()
+    ) throws -> AlarmOwnershipRecord {
+        guard var record = records[alarmID], record.lifecycle != .cancelled,
+              let intent = record.pendingSettingsMutation,
+              intent.operation == .update, intent.mutationID == mutationID
+        else { throw AlarmOwnershipStoreError.settingsMutationIdentityConflict }
+        record.title = intent.beforeTitle
+        record.schedule = intent.beforeSchedule
+        record.sound = intent.beforeSound
+        record.lifecycle = nativeState == nil ? .missing : .accepted
+        record.lastNativeState = nativeState
+        record.lastObservedAt = now
+        record.lastSettingsMutationOutcome = AlarmSettingsMutationOutcome(
+            mutationID: mutationID, operation: .update, resolution: .failed,
+            resolvedAt: now, detail: detail
+        )
+        record.pendingSettingsMutation = nil
+        try commit(record)
+        return record
+    }
+
+    private func commit(_ record: AlarmOwnershipRecord) throws {
+        var nextRecords = records
+        nextRecords[record.alarmID] = record
+        try persist(nextRecords)
+        records = nextRecords
+    }
+
+    private func removeRecord(alarmID: UUID) throws {
+        var nextRecords = records
+        nextRecords.removeValue(forKey: alarmID)
+        try persist(nextRecords)
+        records = nextRecords
+    }
+
+    /// Persist the candidate snapshot before publishing it to in-memory state.
+    /// If the atomic write fails, callers keep observing the last durable
+    /// ownership truth rather than a mutation that exists only for this process.
+    private func persist(_ candidateRecords: [UUID: AlarmOwnershipRecord]) throws {
         let snapshot = Snapshot(
-            records: records.values.sorted { $0.alarmID.uuidString < $1.alarmID.uuidString }
+            records: candidateRecords.values.sorted { $0.alarmID.uuidString < $1.alarmID.uuidString }
         )
         try JSONEncoder.floweroll.encode(snapshot).write(to: fileURL, options: .atomic)
     }
@@ -1051,18 +1111,17 @@ enum AlarmReadbackService {
     static func read(
         alarmID: UUID,
         nativeStore: any AlarmNativeStore,
-        ownershipStore: AlarmOwnershipStore?
+        ownershipStore: AlarmOwnershipStore
     ) async throws -> AlarmReadbackSnapshot? {
-        let native = try await nativeStore.alarms().first { $0.id == alarmID }
-        var ownership = await ownershipStore?.record(alarmID: alarmID)
-        guard native != nil || ownership != nil else { return nil }
-        if let ownershipStore, ownership != nil {
-            ownership = try await ownershipStore.recordObservation(
-                alarmID: alarmID,
-                nativeState: native?.state,
-                isMissing: native == nil
-            )
+        guard var ownership = await ownershipStore.record(alarmID: alarmID) else {
+            return nil
         }
+        let native = try await nativeStore.alarms().first { $0.id == alarmID }
+        ownership = try await ownershipStore.recordObservation(
+            alarmID: alarmID,
+            nativeState: native?.state,
+            isMissing: native == nil
+        )
         return AlarmReadbackSnapshot(
             alarmID: alarmID,
             ownership: ownership,

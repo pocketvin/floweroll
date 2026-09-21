@@ -340,6 +340,18 @@ enum FlowerollGlobalInputRoutingPolicy {
             )
         }
 
+        if let pending = current.pendingInteraction,
+           pending.kind == .clarification,
+           pending.acceptsText,
+           isHighConfidencePendingClarificationSteering(rawText, prompt: pending.prompt)
+        {
+            return .answerPendingInteraction(
+                taskID: current.taskID,
+                interaction: pending,
+                response: .text(rawText.trimmingCharacters(in: .whitespacesAndNewlines))
+            )
+        }
+
         if isHighConfidenceCurrentTaskExpression(text) {
             return .steerCurrentTask(taskID: current.taskID)
         }
@@ -402,6 +414,46 @@ enum FlowerollGlobalInputRoutingPolicy {
         case yesNo
         case choice
         case openText
+    }
+
+    private static func isHighConfidencePendingClarificationSteering(
+        _ rawText: String,
+        prompt rawPrompt: String
+    ) -> Bool {
+        let text = normalized(rawText)
+        let prompt = normalized(rawPrompt)
+        guard !text.isEmpty, text.count <= 120, !prompt.isEmpty else { return false }
+        guard !hasExplicitIndependentMarker(text), !looksLikeStandaloneChatOrQuestion(text) else { return false }
+
+        // Home is normally a global-new-task surface. A visible clarification
+        // may capture a longer free-text instruction only when the text clearly
+        // talks about the same pending subject AND controls the pending workflow.
+        // This keeps "帮我查杭州天气" independent while allowing phrases such
+        // as "先查询这条提醒，再按原计划，删除时再问我" to stay on the Task.
+        guard sharesPendingSubject(text: text, prompt: prompt) else { return false }
+        let workflowMarkers = [
+            "先", "再", "然后", "继续", "按原计划", "原计划", "确认", "查询", "查完",
+            "删除", "保留", "改成", "改为", "不要", "别", "问我", "向我确认",
+        ]
+        return workflowMarkers.contains(where: text.contains)
+    }
+
+    private static func sharesPendingSubject(text: String, prompt: String) -> Bool {
+        let subjectFamilies: [[String]] = [
+            ["提醒", "提醒事项"],
+            ["日历", "日程", "会议"],
+            ["闹钟"],
+            ["联系人", "通讯录"],
+            ["酒店", "住宿"],
+            ["文件", "文档", "附件", "pdf", "docx"],
+            ["预算", "价格", "价位", "费用", "金额"],
+            ["地点", "位置", "区域", "地址"],
+            ["日期", "时间", "几点", "什么时候"],
+            ["高铁", "火车", "车票", "航班", "机票"],
+        ]
+        return subjectFamilies.contains { family in
+            family.contains(where: prompt.contains) && family.contains(where: text.contains)
+        }
     }
 
     private static func isLikelyDirectPendingAnswer(_ rawText: String, prompt rawPrompt: String) -> Bool {

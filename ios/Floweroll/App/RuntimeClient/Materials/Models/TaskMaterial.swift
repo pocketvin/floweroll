@@ -60,12 +60,17 @@ struct TaskMaterialFile: Codable, Sendable, Identifiable {
 
 extension TaskMaterialFile {
     var localInputURL: URL? {
-        guard category == "input",
-              let directory = try? PendingAttachment.directory()
-        else { return nil }
+        guard category == "input" else { return nil }
         let name = id + "." + TaskAttachmentFormat.storedExtension(for: mediaType)
-        let url = directory.appendingPathComponent(name)
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        if let directory = try? PendingAttachment.directory() {
+            let url = directory.appendingPathComponent(name)
+            if FileManager.default.fileExists(atPath: url.path) { return url }
+        }
+        if let directory = try? PendingAttachment.acceptedCacheDirectory() {
+            let url = directory.appendingPathComponent(name)
+            if FileManager.default.fileExists(atPath: url.path) { return url }
+        }
+        return nil
     }
 
     var verifiedLocalInputURL: URL? {
@@ -79,7 +84,7 @@ extension TaskMaterialFile {
             sha256: sha256,
             storedName: storedName
         )
-        return try? attachment.verifiedFileURL()
+        return try? attachment.verifiedPresentationFileURL()
     }
 }
 

@@ -5,7 +5,7 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
@@ -75,7 +75,20 @@ class TaskRuntime:
         self.capability_registry: Optional[CapabilityRegistry] = None
         self.completion_guard = None
         self.additional_observation_provider = None
+        self.predispatch_confirmation_capabilities: set[str] = set()
         self.planner_graph = PlannerGraph()
+        self._close_lock = threading.Lock()
+        self._closed = False
+
+    def close(self) -> None:
+        with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+            memory = self.memory
+        closer = getattr(memory, "close", None)
+        if callable(closer):
+            closer()
 
     @property
     def _storage_identity(self) -> str:
@@ -207,7 +220,8 @@ class TaskRuntime:
                         raw_goal=task["goal"],
                         current_time=now,
                         timezone_name=self.timezone_name,
-                        policy_view=self._policy_view(task["policy_snapshot"], capabilities),
+                        policy_view={**self._policy_view(task["policy_snapshot"], capabilities),
+                                     "task_constraints": effective_policy.model_view()},
                         capabilities=capabilities,
                         task_status=task["status"].upper(),
                         phase=runtime["phase"],
@@ -222,7 +236,11 @@ class TaskRuntime:
                         last_semantic_failure=basis.get("last_semantic_failure"),
                         runtime_context={
                             "invocation_source": task["invocation_source"],
-                            "capability_discovery_state": self.storage.capability_discovery_state(task_id),
+                            "capability_discovery_state": self._capability_discovery_state(task_id),
+                            "predispatch_confirmation_capabilities": sorted(
+                                self.predispatch_confirmation_capabilities
+                                & {cap.name for cap in capabilities}
+                            ),
                             **(self.material_context_provider(task_id) if self.material_context_provider else {}),
                             **dict(runtime_context or {}),
                             "relevant_memories": list(memory_result.get("items") or []),
@@ -284,6 +302,20 @@ class TaskRuntime:
                                 "call_number": call_number,
                                 "reason": "until_time_without_user_temporal_basis",
                                 "replacement": decision.decision_type,
+                            },
+                        )
+                    decision, clarification_regrounded = self._ground_deferred_destructive_clarification(
+                        basis=basis,
+                        decision=decision,
+                    )
+                    if clarification_regrounded:
+                        self.storage.record_trace_event(
+                            task_id,
+                            "planner.pending_clarification.regrounded",
+                            {
+                                "call_number": call_number,
+                                "reason": "user_deferred_destructive_confirmation_until_after_prerequisite",
+                                "replacement": "CANCEL",
                             },
                         )
                     record_metrics("success")
@@ -493,6 +525,23 @@ class TaskRuntime:
             )
         return observation
 
+    def _capability_discovery_state(self, task_id: str) -> Dict[str, Any]:
+        """Keep the base Planner independent from optional discovery storage.
+
+        Progressive capability discovery installs both a selector and its durable
+        Storage extension. Plain PlannerRuntime users should not require that
+        extension just to build a decision context.
+        """
+        if self.capability_context_selector is None:
+            return {}
+        getter = getattr(self.storage, "capability_discovery_state", None)
+        if not callable(getter):
+            raise RuntimeError(
+                "capability_context_selector requires durable capability discovery state"
+            )
+        value = getter(task_id)
+        return dict(value) if isinstance(value, dict) else {}
+
     @staticmethod
     def _memory_query(
         task: Dict[str, Any],
@@ -679,6 +728,70 @@ class TaskRuntime:
         replacement.validate(self.capabilities)
         return replacement, True
 
+    @staticmethod
+    def _ground_deferred_destructive_clarification(
+        *,
+        basis: Dict[str, Any],
+        decision: PlannerDecision,
+    ) -> Tuple[PlannerDecision, bool]:
+        """Cancel an obsolete delete confirmation when the user explicitly defers it.
+
+        A destructive confirmation must bind to the exact target state the user
+        saw. If the user replies "query it first; ask me again when you actually
+        delete it", keeping the old clarification open across that prerequisite
+        read is both stale UX and the wrong authority boundary. Only re-ground a
+        Planner KEEP when all of those facts are explicit; ordinary clarifications
+        may legitimately remain pending while independent safe work progresses.
+        """
+        if decision.decision_type != "EXECUTE" or not isinstance(decision.action, dict):
+            return decision, False
+        state_update = decision.state_update if isinstance(decision.state_update, dict) else {}
+        if state_update.get("pending_clarification") != "KEEP":
+            return decision, False
+
+        pending = basis.get("pending_clarification")
+        if not isinstance(pending, dict):
+            return decision, False
+        clarification_id = str(pending.get("clarification_id") or "")
+        question = str(pending.get("question") or "")
+        payload = pending.get("payload") if isinstance(pending.get("payload"), dict) else {}
+        reason = str(payload.get("reason") or "")
+        destructive_basis = question + "\n" + reason
+        if not re.search(r"(?:删除|移除|remove|delete)", destructive_basis, re.IGNORECASE):
+            return decision, False
+        if not re.search(r"(?:确认|是否|要不要|破坏性|confirm|approve)", destructive_basis, re.IGNORECASE):
+            return decision, False
+
+        matching_texts: List[str] = []
+        for event in basis.get("accepted_events", []):
+            if event.get("event_type") != "USER_TURN":
+                continue
+            event_payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+            reply = event_payload.get("reply_context") if isinstance(event_payload.get("reply_context"), dict) else {}
+            if str(reply.get("clarification_id") or "") != clarification_id:
+                continue
+            content = event_payload.get("content") if isinstance(event_payload.get("content"), dict) else {}
+            text = content.get("text")
+            if isinstance(text, str) and text.strip():
+                matching_texts.append(text.strip())
+        if not matching_texts:
+            return decision, False
+
+        def explicitly_defers_confirmation(text: str) -> bool:
+            compact = re.sub(r"\s+", "", text)
+            if re.search(r"(?:之后|稍后|到时|届时|等.{0,16}后).{0,12}(?:再|重新)?(?:向我)?(?:确认|问我)", compact):
+                return True
+            if re.search(r"真正.{0,16}(?:删除|移除).{0,12}(?:时|之前|前).{0,12}(?:再|重新).{0,12}(?:向我)?(?:确认|问我)", compact):
+                return True
+            return "先" in compact and bool(re.search(r"再.{0,20}(?:确认|问我)", compact))
+
+        if not any(explicitly_defers_confirmation(text) for text in matching_texts):
+            return decision, False
+
+        replacement_state = dict(decision.state_update or {})
+        replacement_state["pending_clarification"] = "CANCEL"
+        return replace(decision, state_update=replacement_state), True
+
     def _enforce_task_policy_decision(
         self,
         *,
@@ -696,7 +809,12 @@ class TaskRuntime:
         )
         if full_spec is None:
             raise ValueError(f"Planner selected unknown capability: {capability_id}")
-        policy_decision = effective_policy.decide(full_spec, self.capability_registry)
+        policy_basis = self.storage.task_policy_basis(task_id)
+        policy_decision = effective_policy.decide(
+            full_spec, self.capability_registry, arguments=decision.action["arguments"],
+            prior_created_titles=[item["title"] for item in policy_basis["completed_creations"]
+                                  if item["capability"] == capability_id],
+        )
         if policy_decision.allowed:
             return
         detail = policy_decision.detail or "TASK_DENIED"

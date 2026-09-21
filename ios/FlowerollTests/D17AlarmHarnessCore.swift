@@ -1089,6 +1089,8 @@ enum D16Runner {
             return .object(["kind": .string("completed"), "execution": resultJSON(execution)])
         case .definitelyNotStarted:
             return .object(["kind": .string("definitely_not_started")])
+        case .resumeAuthorizedOperation:
+            return .object(["kind": .string("resume_authorized_operation")])
         case let .stillUnknown(reason):
             return .object([
                 "kind": .string("still_unknown"),

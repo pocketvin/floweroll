@@ -45,7 +45,11 @@ OpenAI-compatible model call
         ↓
 结构化 PlannerDecision
         ↓
-Action + Attempt 在执行前持久化
+Action 先持久化
+        ↓
+需要破坏性确认时：exact target / revision → binding-aware ACTION_INPUT
+        ↓
+用户确认后才创建 Attempt；无需确认的 Action 直接进入 Attempt
         ↓
 CapabilityRegistry 解析 semantic capability
         ↓
@@ -106,7 +110,7 @@ Planner 看到的是稳定的 **semantic capability**，而不是 Provider 自�
 | 高德地图 | **Amap MCP** | `geocode.resolve`、`weather.query`、`places.search`、`places.search_nearby`、`routes.walk`、`routes.drive`、`routes.transit`、`routes.distance` | 高德原始 `maps_*` Tool 不直接进入全局能力 namespace |
 | 高德坐标转换 | 官方 **Amap WebService** | `coords.convert` | iPhone/GPS 的 WGS84 先转 GCJ-02，再进入高德附近搜索/路线链路 |
 | 飞猪酒店 | **FlyAI managed CLI**（当前固定 `@fly-ai/flyai-cli 1.0.16`） | `travel.hotel.search` | 当前不是 MCP；只查询真实酒店候选、报价和飞猪/Fliggy 跳转链接，不代表已经预订 |
-| 公网搜索 | **Exa MCP** | semantic search capability | Provider discovery 失败时不向 Planner 假装能力 ready |
+| 公网搜索 | **Exa MCP** | `web.search` | Provider discovery 失败时不向 Planner 假装能力 ready |
 | 开发文档 | **Context7 MCP**（显式启用） | 文档查询 | 默认不强制启用 |
 | 额外 MCP | 环境配置的 MCP catalog | discovery 后映射出的 semantic capability | 只有 discovery 成功且完成 semantic mapping 才进入 Registry |
 | iPhone 原生 | EventKit / Contacts / AlarmKit / CoreLocation / Notifications 等 | `calendar.*`、`reminder.*`、`contacts.*`、`alarm.*`、`location.current` | 由 iPhone 执行并读回系统真实状态 |
@@ -153,7 +157,11 @@ Timeline / Structured Result → iPhone
 
 Task / Action / Attempt / Observation / Trace 持久化，任务中途补充与取消，来源明确的能力发现，附件预上传、系统托管后台续传与断点对账，PDF/OCR、图片与 DOCX 处理，以及日历、提醒事项、联系人、闹钟、定位和本地通知的原生执行与核验。
 
-Planner 支持 OpenAI-compatible 接口；Mem0 用作辅助长期记忆，不替代任务数据库。开发者工具可以查看真实请求上下文、能力选择、Provider/Tool、响应、验证结果与耗时。
+App 内用户启动的长任务由 `BGContinuedProcessingTask` 持有 execution/presentation window；Action Button / Siri / Shortcut 等系统入口使用 `LongRunningIntent`；附件字节传输独立交给 background `URLSession`，`BGProcessingTask` 只做机会式恢复。三个通道都不能替代 Host durable truth。
+
+Planner 支持 OpenAI-compatible 接口，并对复杂任务做有界 evidence compaction、capability discovery 收敛与 provider-specific reasoning 配置；Kimi K3 的逐步 Planner 默认使用低 reasoning effort，避免把一次“下一步决策”变成长时间生成。Mem0 用作辅助长期记忆，不替代任务数据库。
+
+需要 destructive side effect 的 capability 由真实 Adapter 声明 `predispatch_confirmation`：Planner 只规划语义 Action，ExecutionRuntime 在创建 Attempt 前生成绑定 exact identity / revision 的 `ACTION_INPUT`。开发者工具可以查看真实请求上下文、能力选择、Provider/Tool、响应、验证结果与耗时。
 
 ## 技术栈与工程选择
 
@@ -186,7 +194,7 @@ Planner 支持 OpenAI-compatible 接口；Mem0 用作辅助长期记忆，不替
 | **EventKit** | Calendar / Reminder 读取、写入、更新、删除和 readback |
 | **Contacts / ContactsUI** | 联系人查询、创建、修改及权限边界 |
 | **CoreLocation** | 一次性当前位置与权限状态；不把定位历史当默认产品数据 |
-| **UserNotifications + BackgroundTasks** | 用户可见通知与受控后台执行入口 |
+| **UserNotifications + BackgroundTasks** | 用户可见通知、`BGContinuedProcessingTask` 长执行窗口与 `BGProcessingTask` 补偿恢复 |
 | **AppIntents** | Action Button / 系统入口，把自然语言任务送入同一 durable Runtime |
 | **CryptoKit + Security/Keychain** | hash/identity、Host pairing token 和本地 secret storage |
 
@@ -265,7 +273,9 @@ python3 scripts/fetch_gitleaks.py
 python3 scripts/verify_secrets.py
 .venv/bin/python scripts/verify_floweroll_ip.py
 scripts/verify_host_regression.sh full
+scripts/verify_ios_regression.sh runtime
 scripts/verify_ios_regression.sh unit
+scripts/verify_ios_regression.sh build
 ```
 
 Host 回归使用确定性测试，不要求真实模型 Key。资源检查同时检查 PNG 身份、透明通道和图层重组；XCTest 另验证 Rive 文件仍能按已定义的 artboard/state machine 加载。
@@ -274,7 +284,7 @@ Host 回归使用确定性测试，不要求真实模型 Key。资源检查同�
 
 灵动岛目前冻结在本地 ActivityKit 方案，不具备 Host → APNs 的远程更新链路。后台挂起时不能保证动画或状态持续刷新，动画停止不能被解释为任务失败。
 
-原生权限、后台调度、AlarmKit、系统音频和屏幕捕获仍须在真实设备上验证。编译成功和单元测试通过不等于平台真机验收通过。
+原生权限、后台调度、AlarmKit、系统音频和屏幕捕获仍须在真实设备上验证。当前开发候选已对 AlarmKit 配置替换/读回、提醒 create→query→remove→query、取消恢复和复杂 Task 后台闭环做过真机验收，但这不等于所有设备、系统调度时机或权限状态都自动成立；编译成功和单元测试通过仍不能替代目标设备验收。
 
 ## 目录与文档
 

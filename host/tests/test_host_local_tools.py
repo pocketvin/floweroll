@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -29,6 +30,7 @@ class HostLocalToolTests(unittest.TestCase):
         self.worker = FunctionExecutionWorker(self.execution, self.registry, self.executors)
 
     def tearDown(self) -> None:
+        self.worker.close()
         self.temp.cleanup()
 
     def _action(self, *, task_id: str, action_id: str, capability: str, payload: dict) -> None:
@@ -162,6 +164,83 @@ class HostLocalToolTests(unittest.TestCase):
             self.assertEqual(obs["numeric_summary"]["value"]["mean"], 3.0)
         finally:
             supervisor.stop()
+
+    def test_slow_function_does_not_block_or_duplicate_independent_function_work(self) -> None:
+        (self.root / "fast.txt").write_text("fast", encoding="utf-8")
+        slow_started = threading.Event()
+        release_slow = threading.Event()
+        slow_calls = 0
+
+        def slow_list(_):
+            nonlocal slow_calls
+            slow_calls += 1
+            slow_started.set()
+            if not release_slow.wait(timeout=2):
+                raise TimeoutError("test slow function was not released")
+            return {"entries": []}
+
+        self.worker.executors["file.list"] = slow_list
+        self._action(
+            task_id="a-slow-function",
+            action_id="a-slow-action",
+            capability="file.list",
+            payload={"path": "."},
+        )
+        self._action(
+            task_id="b-fast-function",
+            action_id="b-fast-action",
+            capability="file.read",
+            payload={"path": "fast.txt"},
+        )
+
+        try:
+            started = time.monotonic()
+            self.assertEqual(self.worker.sweep_once(), [])
+            self.assertLess(time.monotonic() - started, 0.2)
+            self.assertTrue(slow_started.wait(timeout=1))
+
+            deadline = time.monotonic() + 1
+            while time.monotonic() < deadline:
+                if self.store.get_task("b-fast-function")["status"] == "completed":
+                    break
+                time.sleep(0.01)
+            self.assertEqual(self.store.get_task("b-fast-function")["status"], "completed")
+            self.assertNotEqual(self.store.get_task("a-slow-function")["status"], "completed")
+
+            for _ in range(3):
+                self.worker.sweep_once()
+            self.assertEqual(slow_calls, 1, "in-flight Task must not be redispatched")
+
+            release_slow.set()
+            deadline = time.monotonic() + 1
+            while time.monotonic() < deadline:
+                if self.store.get_task("a-slow-function")["status"] == "completed":
+                    break
+                time.sleep(0.01)
+            self.assertEqual(self.store.get_task("a-slow-function")["status"], "completed")
+        finally:
+            release_slow.set()
+
+    def test_function_completion_callback_wakes_owner_for_result_harvest(self) -> None:
+        (self.root / "wake.txt").write_text("wake", encoding="utf-8")
+        self._action(
+            task_id="callback-task",
+            action_id="callback-action",
+            capability="file.read",
+            payload={"path": "wake.txt"},
+        )
+        completed = threading.Event()
+        self.worker.set_completion_callback(completed.set)
+
+        self.assertEqual(self.worker.sweep_once(), [])
+        self.assertTrue(completed.wait(timeout=1))
+
+        harvested = self.worker.sweep_once()
+        self.assertEqual(len(harvested), 1)
+        self.assertEqual(
+            harvested[0]["task"]["status"],
+            "completed",
+        )
 
 
 if __name__ == "__main__":

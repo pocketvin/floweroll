@@ -393,10 +393,24 @@ class TaskAssetStore:
                 raise ValueError("DOCX 输出文件名必须以 .docx 结尾。")
             package_metadata = validate_docx_package(data)
         fid = 'out_' + hashlib.sha256((task_id + ':' + action_id + ':' + media_type).encode()).hexdigest()[:32]
-        # Replay reads the original immutable result, never silently replaces it.
+        # Same-Action replay is allowed only when it reproduces the exact
+        # immutable artifact. Never return an older file for newly generated
+        # different bytes: that would make verification describe one result
+        # while the user receives another.
+        digest = hashlib.sha256(data).hexdigest()
         with self._lock:
             old = self.db.execute("SELECT * FROM files WHERE id=?", (fid,)).fetchone()
             if old:
+                old_metadata = json.loads(old['metadata_json'])
+                if (
+                    old['task_id'] != task_id
+                    or old['media_type'] != media_type
+                    or old['category'] != category
+                    or old['name'] != clean_name
+                    or old['sha256'] != digest
+                    or old_metadata.get('action_id') != action_id
+                ):
+                    raise ValueError("同一 Action 的输出重放与已保存成果不一致，拒绝覆盖或伪装幂等。")
                 return self._view(old)
         return self._save(file_id=fid, name=clean_name, media_type=media_type, data=data,
                           suffix=suffix, task_id=task_id, category=category,
@@ -773,9 +787,19 @@ class TaskAssetStore:
         normalized = [{"id": x['id'], "title": x['title'][:80], "depends_on": x.get('depends_on', []),
                        **({"completion_rule": x["completion_rule"]} if "completion_rule" in x else {})} for x in items]
         with self._lock:
-            previous = self.db.execute("SELECT items_json,updated_at FROM plans WHERE task_id=?", (task_id,)).fetchone()
+            previous = self.db.execute(
+                "SELECT title,items_json,updated_at FROM plans WHERE task_id=?",
+                (task_id,),
+            ).fetchone()
             if previous:
                 old_items = json.loads(previous['items_json'])
+                if previous['title'] == title[:120] and old_items == normalized:
+                    return {
+                        "title": previous['title'],
+                        "items": old_items,
+                        "execution": "sequential_runtime_with_bounded_parallel_material_reads",
+                        "idempotent_replay": True,
+                    }
                 new_by_id = {item['id']: item for item in normalized}
                 changed_contracts = [item for item in old_items if 'completion_rule' in item and (
                     item['id'] not in new_by_id or

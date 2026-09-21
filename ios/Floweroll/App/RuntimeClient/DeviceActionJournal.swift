@@ -20,6 +20,7 @@ struct DeviceActionJournalEntry: Codable, Equatable, Sendable {
     var nativeCorrelationID: String?
     let createdAt: Date
     var updatedAt: Date
+    var executionCount: Int? = nil
 }
 
 enum DeviceActionJournalDecision: Equatable, Sendable {
@@ -100,8 +101,7 @@ actor DeviceActionJournal {
             createdAt: now,
             updatedAt: now
         )
-        entries[dispatch.attemptID] = entry
-        try persist()
+        try commit(entry)
         return .execute(entry)
     }
 
@@ -127,8 +127,7 @@ actor DeviceActionJournal {
         entry.result = result
         entry.error = error
         entry.updatedAt = now
-        entries[attemptID] = entry
-        try persist()
+        try commit(entry)
         return entry
     }
 
@@ -140,9 +139,9 @@ actor DeviceActionJournal {
             throw DeviceActionJournalError.invalidTransition
         }
         entry.state = .mayHaveStarted
+        entry.executionCount = (entry.executionCount ?? 0) + 1
         entry.updatedAt = now
-        entries[attemptID] = entry
-        try persist()
+        try commit(entry)
         return entry
     }
 
@@ -160,8 +159,7 @@ actor DeviceActionJournal {
         // `received` permits one safe execution of the same Host Attempt.
         entry.state = .received
         entry.updatedAt = now
-        entries[attemptID] = entry
-        try persist()
+        try commit(entry)
         return entry
     }
 
@@ -185,8 +183,7 @@ actor DeviceActionJournal {
         entry.error = error
         entry.nativeCorrelationID = nativeCorrelationID
         entry.updatedAt = now
-        entries[attemptID] = entry
-        try persist()
+        try commit(entry)
         return entry
     }
 
@@ -202,8 +199,7 @@ actor DeviceActionJournal {
         }
         entry.state = .resultDelivered
         entry.updatedAt = now
-        entries[attemptID] = entry
-        try persist()
+        try commit(entry)
         return entry
     }
 
@@ -222,10 +218,13 @@ actor DeviceActionJournal {
             }
     }
 
-    private func persist() throws {
-        let snapshot = Snapshot(entries: entries.values.sorted { $0.attemptID < $1.attemptID })
+    private func commit(_ entry: DeviceActionJournalEntry) throws {
+        var candidate = entries
+        candidate[entry.attemptID] = entry
+        let snapshot = Snapshot(entries: candidate.values.sorted { $0.attemptID < $1.attemptID })
         let data = try JSONEncoder.floweroll.encode(snapshot)
         try data.write(to: fileURL, options: .atomic)
+        entries = candidate
     }
 
     private static func defaultDirectoryURL() throws -> URL {

@@ -36,6 +36,9 @@ struct DeviceExecutionResult: Equatable, Sendable {
 enum DeviceReconciliationResult: Equatable, Sendable {
     case completed(DeviceExecutionResult)
     case definitelyNotStarted
+    /// A durable multi-step transaction needs continuation; unlike
+    /// definitelyNotStarted, an earlier native side effect may already exist.
+    case resumeAuthorizedOperation
     case stillUnknown(String?)
 }
 
@@ -160,9 +163,14 @@ actor DeviceExecutionCoordinator {
         switch decision {
         case .execute:
             if dispatch.reconciliationOnly == true {
-                // The Host has stopped this task. Even a locally received but
-                // unstarted dispatch cannot cross the side-effect boundary.
-                return .needsReconciliation(attemptID: dispatch.attemptID, reason: "任务已停止，原操作尚未执行")
+                // A received journal entry is durable proof that this device
+                // never crossed the native side-effect boundary for the Attempt.
+                _ = try await client.submitDeviceDefinitelyNotStarted(
+                    taskID: dispatch.taskID,
+                    actionID: dispatch.actionID,
+                    attemptID: dispatch.attemptID
+                )
+                return .completed(attemptID: dispatch.attemptID)
             }
             return try await executeFresh(
                 dispatch,
@@ -200,7 +208,25 @@ actor DeviceExecutionCoordinator {
 
             case .definitelyNotStarted:
                 if dispatch.reconciliationOnly == true {
-                    return .needsReconciliation(attemptID: dispatch.attemptID, reason: "原操作未完成，保持停止状态")
+                    _ = try await journal.markDefinitelyNotStarted(
+                        attemptID: dispatch.attemptID
+                    )
+                    _ = try await client.submitDeviceDefinitelyNotStarted(
+                        taskID: dispatch.taskID,
+                        actionID: dispatch.actionID,
+                        attemptID: dispatch.attemptID
+                    )
+                    return .completed(attemptID: dispatch.attemptID)
+                }
+                if (entry.executionCount ?? 1) >= 3 {
+                    let failure = DeviceExecutionResult.failure("重复执行未产生结果，已停止自动重试。", output: [
+                        "error_code": .string("device_replay_budget_exhausted"),
+                        "native_no_effect_verified": .bool(true)
+                    ])
+                    _ = try await journal.recordResult(attemptID: dispatch.attemptID, success: false,
+                        result: failure.output, error: failure.error)
+                    try await deliverDurableResult(dispatch: dispatch, result: failure)
+                    return .completed(attemptID: dispatch.attemptID)
                 }
                 _ = try await journal.markDefinitelyNotStarted(
                     attemptID: dispatch.attemptID
@@ -209,6 +235,14 @@ actor DeviceExecutionCoordinator {
                     dispatch,
                     executor: executor
                 )
+
+            case .resumeAuthorizedOperation:
+                guard dispatch.reconciliationOnly != true else {
+                    return .needsReconciliation(attemptID: dispatch.attemptID, reason: "stopped_transaction_requires_settlement")
+                }
+                // Keep mayHaveStarted; never manufacture a not-started receipt
+                // for a transaction which has already removed the old alarm.
+                return try await executeStarted(dispatch, executor: executor)
 
             case let .stillUnknown(reason):
                 return .needsReconciliation(
@@ -267,6 +301,12 @@ actor DeviceExecutionCoordinator {
         }
 
         _ = try await journal.markMayHaveStarted(attemptID: dispatch.attemptID)
+        return try await executeStarted(dispatch, executor: executor)
+    }
+
+    private func executeStarted(
+        _ dispatch: DeviceActionDispatch, executor: any DeviceCapabilityExecutor
+    ) async throws -> DeviceExecutionCoordinatorOutcome {
         let result: DeviceExecutionResult
         do {
             result = try await executor.execute(dispatch)

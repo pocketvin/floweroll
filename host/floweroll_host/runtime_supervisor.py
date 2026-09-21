@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import logging
 import threading
+import traceback
 import uuid
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed, wait
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -12,6 +14,9 @@ from .recovery import RecoveryCoordinator
 from .task_capability_policy import TaskCapabilityDeniedError
 from .task_runtime import PlannerAlreadyRunningError, PlannerWorkSupersededError, TaskRuntime
 from .storage import PlannerBudgetExceededError, Storage
+
+
+logger = logging.getLogger(__name__)
 
 
 class RuntimeSupervisor:
@@ -65,6 +70,10 @@ class RuntimeSupervisor:
         self._planner_futures_lock = threading.Lock()
         self._control_thread: Optional[threading.Thread] = None
         self._execution_thread: Optional[threading.Thread] = None
+        for worker in self.execution_workers:
+            setter = getattr(worker, "set_completion_callback", None)
+            if callable(setter):
+                setter(self._execution_wake.set)
 
     @property
     def configured(self) -> bool:
@@ -114,7 +123,7 @@ class RuntimeSupervisor:
             self._execution_thread.start()
             self._execution_wake.set()
 
-    def stop(self, timeout_seconds: float = 3.0) -> None:
+    def stop(self, timeout_seconds: float = 3.0, planner_drain_seconds: float = 0.5) -> bool:
         self._stop.set()
         self._planner_wake.set()
         self._control_wake.set()
@@ -122,15 +131,60 @@ class RuntimeSupervisor:
         for thread in (self._planner_thread, self._control_thread, self._execution_thread):
             if thread is not None and thread.is_alive():
                 thread.join(timeout=timeout_seconds)
+
+        with self._planner_futures_lock:
+            planner_futures = tuple(self._planner_futures.values())
         planner_pool = self._planner_pool
         self._planner_pool = None
         if planner_pool is not None:
             planner_pool.shutdown(wait=False, cancel_futures=True)
+
+        pending = set()
+        if planner_futures:
+            _, pending = wait(
+                planner_futures,
+                timeout=max(0.0, float(planner_drain_seconds)),
+            )
         with self._planner_futures_lock:
-            self._planner_futures.clear()
+            for task_id, future in list(self._planner_futures.items()):
+                if future.done():
+                    self._planner_futures.pop(task_id, None)
         self._planner_thread = None
         self._control_thread = None
         self._execution_thread = None
+        return not pending
+
+    def when_planner_drained(self, callback: Callable[[], None]) -> None:
+        """Run callback once every already-admitted Planner future settles."""
+        with self._planner_futures_lock:
+            pending = {
+                future
+                for future in self._planner_futures.values()
+                if not future.done()
+            }
+        if not pending:
+            callback()
+            return
+
+        callback_lock = threading.Lock()
+        fired = False
+
+        def settled(future: Future) -> None:
+            nonlocal fired
+            should_fire = False
+            with callback_lock:
+                pending.discard(future)
+                if not pending and not fired:
+                    fired = True
+                    should_fire = True
+            if should_fire:
+                try:
+                    callback()
+                except Exception:
+                    pass
+
+        for future in tuple(pending):
+            future.add_done_callback(settled)
 
     def wake(self) -> None:
         if self.task_runtime is not None:
@@ -415,8 +469,8 @@ class RuntimeSupervisor:
             self._planner_wake.clear()
             try:
                 self.planner_schedule_once()
-            except Exception:
-                pass
+            except Exception as exc:
+                self._log_background_loop_error("planner", exc)
             if self._stop.is_set():
                 break
             self._planner_wake.wait(self.poll_interval_seconds)
@@ -427,8 +481,8 @@ class RuntimeSupervisor:
                 values = self.execution_sweep_once()
                 if values and self.task_runtime is not None:
                     self._planner_wake.set()
-            except Exception:
-                pass
+            except Exception as exc:
+                self._log_background_loop_error("execution", exc)
             self._execution_wake.wait(self.poll_interval_seconds)
             self._execution_wake.clear()
 
@@ -436,7 +490,33 @@ class RuntimeSupervisor:
         while not self._stop.is_set():
             try:
                 self.control_sweep_once()
-            except Exception:
-                pass
+            except Exception as exc:
+                self._log_background_loop_error("control", exc)
             self._control_wake.wait(self.poll_interval_seconds)
             self._control_wake.clear()
+
+    @staticmethod
+    def _log_background_loop_error(lane: str, exc: Exception) -> None:
+        """Surface scheduler failures without mutating durable Task truth.
+
+        Expected task-scoped Planner failures are handled by ``advance_task``
+        and execution/reconciliation failures stay owned by their workers. This
+        guard is only for an unexpected failure of the long-lived scheduler
+        loop itself. Logging the error type (rather than arbitrary exception
+        text) keeps diagnostics useful without leaking provider/user payloads.
+        Do not attach ``exc_info`` here: Python's formatted traceback includes
+        ``str(exc)``, which can contain provider responses or user data.
+        """
+        frames = traceback.extract_tb(exc.__traceback__)
+        if frames:
+            frame = frames[-1]
+            filename = frame.filename.rsplit("/", 1)[-1]
+            origin = f"{filename}:{frame.lineno}:{frame.name}"
+        else:
+            origin = "unknown"
+        logger.error(
+            "runtime supervisor %s loop failed; error_type=%s; origin=%s",
+            lane,
+            type(exc).__name__,
+            origin,
+        )

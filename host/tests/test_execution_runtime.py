@@ -58,6 +58,28 @@ class TransientThenSuccessAdapter:
         return ExecutionVerification(outcome="SUCCESS", observation={"value": action["payload"]["value"]})
 
 
+class NoBlindDeviceAdapter:
+    capability_id = "test.device.no_blind"
+    source_kind = "ios"
+    execution_profile = ExecutionProfile(
+        timeout_seconds=10,
+        idempotency_mode="DEVICE_JOURNAL",
+        retry_mode="NO_BLIND_RETRY",
+        verification_mode="DEVICE_READ_BACK",
+        reconciliation_mode="DEVICE_READ_BACK",
+        max_attempts=1,
+    )
+
+    def build_dispatch_snapshot(self, action):
+        return {
+            "capability": self.capability_id,
+            "idempotency_key": action["idempotency_key"],
+        }
+
+    def verify_result(self, action, *, success, output, error):
+        return ExecutionVerification(outcome="TERMINAL_FAILURE", error=error or "unused")
+
+
 class ExecutionRuntimeTests(unittest.TestCase):
     @staticmethod
     def policy_spec(name: str, description: str) -> CapabilitySpec:
@@ -65,6 +87,32 @@ class ExecutionRuntimeTests(unittest.TestCase):
             name, description,
             {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
         )
+
+    def test_verifier_cannot_claim_runtime_owned_unknown_or_input_required(self) -> None:
+        for outcome in ("UNKNOWN", "INPUT_REQUIRED"):
+            with self.subTest(outcome=outcome):
+                with self.assertRaisesRegex(
+                    ValueError, "invalid execution verification outcome"
+                ):
+                    ExecutionVerification(outcome=outcome)
+
+    def test_write_function_requires_explicit_replay_safe_contract(self) -> None:
+        with self.assertRaisesRegex(ValueError, "replay_safe=True"):
+            FunctionToolAdapter(
+                capability_id="unsafe.write",
+                source_kind="host_local",
+                read_only=False,
+            )
+
+        adapter = FunctionToolAdapter(
+            capability_id="safe.write",
+            source_kind="host_local",
+            read_only=False,
+            replay_safe=True,
+        )
+        self.assertEqual(adapter.execution_profile.idempotency_mode, "EXACT_INPUT")
+        self.assertEqual(adapter.execution_profile.retry_mode, "SAFE_WITH_SAME_KEY")
+        self.assertEqual(adapter.execution_profile.reconciliation_mode, "REPLAY_SAME_ATTEMPT")
 
     def test_task_denied_write_fails_before_any_action_attempt(self) -> None:
         store = Storage(":memory:")
@@ -85,7 +133,12 @@ class ExecutionRuntimeTests(unittest.TestCase):
         spec = self.policy_spec("generic.write", "Write project records")
         runtime = ExecutionRuntime(
             store,
-            [FunctionToolAdapter(capability_id="generic.write", source_kind="host_local", read_only=False)],
+            [FunctionToolAdapter(
+                capability_id="generic.write",
+                source_kind="host_local",
+                read_only=False,
+                replay_safe=True,
+            )],
             capability_specs=[spec],
         )
 
@@ -475,6 +528,89 @@ class ExecutionRuntimeTests(unittest.TestCase):
         trace_types = [event["event_type"] for event in store.trace(task["task_id"])]
         self.assertIn("action.superseded_before_retry", trace_types)
         self.assertIsNotNone(old_wait_id)
+
+    def test_device_not_started_proof_finalizes_cancel_without_retry_permission(self) -> None:
+        store = Storage(":memory:")
+        task = store.create_task(
+            "cancel-no-blind",
+            "执行一个原生写操作",
+            "unit",
+            {},
+            status="active",
+        )
+        action = store.create_action(
+            action_id="cancel-no-blind-action",
+            task_id=task["task_id"],
+            step_index=1,
+            action_type=NoBlindDeviceAdapter.capability_id,
+            payload={},
+            expected={},
+            idempotency_key="cancel-no-blind:stable",
+            on_verified="COMPLETE",
+        )
+        runtime = ExecutionRuntime(store, [NoBlindDeviceAdapter()])
+        dispatch = runtime.next_action(task["task_id"], source_kind="ios")
+        assert dispatch is not None
+        store.admit_cancel_request(
+            task_id=task["task_id"],
+            event_id="cancel-no-blind-event",
+            reason="停止",
+        )
+        store.consume_cancel_request(event_id="cancel-no-blind-event")
+
+        result = runtime.reconcile_device_definitely_not_started(
+            task_id=task["task_id"],
+            action_id=action["action_id"],
+            attempt_id=dispatch["attempt_id"],
+        )
+        self.assertFalse(result["duplicate"])
+        self.assertEqual(result["task"]["status"], "cancelled")
+        self.assertEqual(result["action"]["status"], "cancelled")
+        self.assertEqual(len(store.action_attempts(action["action_id"])), 1)
+        self.assertEqual(
+            store.get_action_attempt(dispatch["attempt_id"])["latest_outcome"],
+            "CANCELLED",
+        )
+        self.assertIsNone(runtime.next_action(task["task_id"], source_kind="ios"))
+
+        late = runtime.accept_result(
+            task_id=task["task_id"],
+            action_id=action["action_id"],
+            attempt_id=dispatch["attempt_id"],
+            success=True,
+            output={"unexpected": "late success"},
+        )
+        self.assertTrue(late["duplicate"])
+        self.assertEqual(store.get_action(action["action_id"])["status"], "cancelled")
+        self.assertEqual(
+            store.get_action_attempt(dispatch["attempt_id"])["latest_outcome"],
+            "CANCELLED",
+        )
+
+        replay = runtime.reconcile_device_definitely_not_started(
+            task_id=task["task_id"],
+            action_id=action["action_id"],
+            attempt_id=dispatch["attempt_id"],
+        )
+        self.assertTrue(replay["duplicate"])
+        self.assertEqual(len(store.action_attempts(action["action_id"])), 1)
+
+    def test_device_not_started_proof_cannot_stop_an_uninterrupted_action(self) -> None:
+        store = Storage(":memory:")
+        task = store.create_task("not-stopped", "仍在执行", "unit", {}, status="active")
+        action = store.create_action(
+            action_id="not-stopped-action", task_id=task["task_id"], step_index=1,
+            action_type=NoBlindDeviceAdapter.capability_id, payload={}, expected={},
+            idempotency_key="not-stopped:stable", on_verified="COMPLETE",
+        )
+        runtime = ExecutionRuntime(store, [NoBlindDeviceAdapter()])
+        dispatch = runtime.next_action(task["task_id"], source_kind="ios")
+        assert dispatch is not None
+        with self.assertRaisesRegex(InvalidPlannerTransitionError, "not stopped"):
+            runtime.reconcile_device_definitely_not_started(
+                task_id=task["task_id"], action_id=action["action_id"],
+                attempt_id=dispatch["attempt_id"],
+            )
 
     def test_max_attempts_is_enforced_after_reconciliation(self) -> None:
         store = Storage(":memory:")

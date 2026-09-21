@@ -39,6 +39,7 @@ private actor FakeAlarmNativeStore: AlarmNativeStore {
     private var nextResumeError: AlarmNativeStoreError?
     private var readError: AlarmNativeStoreError?
     private var persistScheduledRecord = true
+    private var rejectsExistingSchedule = false
     private var scheduleCalls = 0
     private var cancelCalls = 0
     private var pauseCalls = 0
@@ -62,6 +63,9 @@ private actor FakeAlarmNativeStore: AlarmNativeStore {
 
     func schedule(_ request: AlarmNativeScheduleRequest) async throws -> AlarmNativeRecord {
         scheduleCalls += 1
+        if rejectsExistingSchedule && records[request.id] != nil {
+            throw AlarmNativeStoreError.nativeFailure("existing_native_id")
+        }
         if let error = nextScheduleError {
             nextScheduleError = nil
             throw error
@@ -123,6 +127,7 @@ private actor FakeAlarmNativeStore: AlarmNativeStore {
 
     nonisolated func alarmUpdates() -> AsyncStream<[AlarmNativeRecord]> { updatesHub.stream() }
 
+    func setRejectExistingSchedule(_ value: Bool) { rejectsExistingSchedule = value }
     func setAuthorization(_ value: AlarmAuthorizationStatus) { authorization = value }
 
     func setRecord(_ record: AlarmNativeRecord?) {
@@ -235,6 +240,123 @@ final class AlarmExecutorsTests: XCTestCase {
             ]),
             "sound": .string(sound),
         ]
+    }
+
+    func testOwnershipAcceptancePersistenceFailureDoesNotLeavePhantomOwner() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("alarm-owner-create-write-failure-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let ownership = try AlarmOwnershipStore(directoryURL: directory)
+        let alarmID = UUID()
+        let request = dispatch(
+            actionType: "alarm.create",
+            payload: fixedPayload(),
+            key: "owner-create-write-failure",
+            actionID: "owner-create-write-failure-action"
+        )
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+
+        do {
+            _ = try await ownership.recordAccepted(
+                alarmID: alarmID,
+                dispatch: request,
+                title: "不应成为 phantom owner",
+                schedule: .fixed(Date(timeIntervalSince1970: 1_900_000_000)),
+                nativeState: .scheduled
+            )
+            XCTFail("unwritable ownership ledger must reject acceptance")
+        } catch {}
+
+        let recordAfterAcceptanceFailure = await ownership.record(alarmID: alarmID)
+        XCTAssertNil(recordAfterAcceptanceFailure)
+    }
+
+    func testOwnershipCancelPersistenceFailureKeepsPriorOwnedState() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("alarm-owner-cancel-write-failure-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let ownership = try AlarmOwnershipStore(directoryURL: directory)
+        let alarmID = UUID()
+        let request = dispatch(
+            actionType: "alarm.create",
+            payload: fixedPayload(),
+            key: "owner-cancel-write-failure",
+            actionID: "owner-cancel-write-failure-create"
+        )
+        _ = try await ownership.recordAccepted(
+            alarmID: alarmID,
+            dispatch: request,
+            title: "仍应保持 owned",
+            schedule: .fixed(Date(timeIntervalSince1970: 1_900_000_000)),
+            nativeState: .scheduled
+        )
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+
+        do {
+            _ = try await ownership.markCancelled(
+                alarmID: alarmID,
+                actionID: "owner-cancel-write-failure-action"
+            )
+            XCTFail("unwritable ownership ledger must reject cancellation mutation")
+        } catch {}
+
+        let currentValue = await ownership.record(alarmID: alarmID)
+        let current = try XCTUnwrap(currentValue)
+        XCTAssertEqual(current.lifecycle, .accepted)
+        XCTAssertNil(current.cancelledAt)
+        XCTAssertNil(current.cancelledByActionID)
+    }
+
+    func testOwnershipSettingsPersistenceFailureDoesNotLeavePendingIntent() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("alarm-owner-settings-write-failure-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let ownership = try AlarmOwnershipStore(directoryURL: directory)
+        let alarmID = UUID()
+        let request = dispatch(
+            actionType: "alarm.create",
+            payload: typedFixedPayload(),
+            key: "owner-settings-write-failure",
+            actionID: "owner-settings-write-failure-create"
+        )
+        _ = try await ownership.recordAccepted(
+            alarmID: alarmID,
+            dispatch: request,
+            title: "原始闹钟",
+            schedule: .fixed(Date(timeIntervalSince1970: 1_900_000_000)),
+            nativeState: .scheduled
+        )
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+
+        do {
+            _ = try await ownership.beginSettingsMutation(
+                alarmID: alarmID,
+                mutationID: "owner-settings-write-failure-mutation",
+                operation: .update,
+                beforeNativeState: .scheduled,
+                requestedTitle: "不应留在内存",
+                requestedSchedule: .weekly(hour: 8, minute: 0, weekdays: [.monday]),
+                requestedSound: .defaultSound
+            )
+            XCTFail("unwritable ownership ledger must reject settings mutation")
+        } catch {}
+
+        let currentValue = await ownership.record(alarmID: alarmID)
+        let current = try XCTUnwrap(currentValue)
+        XCTAssertNil(current.pendingSettingsMutation)
+        XCTAssertEqual(current.title, "原始闹钟")
     }
 
     private func updatePayload(
@@ -831,6 +953,50 @@ final class AlarmExecutorsTests: XCTestCase {
         await native.setAuthorization(.authorized)
         let executeFailure = try await read.execute(request)
         XCTAssertEqual(executeFailure.output["error_code"]?.stringValue, AlarmFailureCode.unknownTarget.rawValue)
+    }
+
+    func testReadRejectsForeignNativeAlarmAndUnavailableOwnershipLedger() async throws {
+        let foreignID = UUID()
+        let native = FakeAlarmNativeStore(records: [
+            AlarmNativeRecord(
+                id: foreignID,
+                schedule: .fixed(Date(timeIntervalSince1970: 1_900_000_000)),
+                state: .scheduled
+            ),
+        ])
+        let request = dispatch(
+            actionType: "alarm.read",
+            payload: ["alarm_id": .string(foreignID.uuidString)]
+        )
+
+        let ownership = try AlarmOwnershipStore(directoryURL: try directory())
+        let foreignRead = AlarmReadExecutor(nativeStore: native, ownershipStore: ownership)
+        let foreignPreflight = try await foreignRead.preflight(request)
+        XCTAssertEqual(
+            foreignPreflight?.output["error_code"]?.stringValue,
+            AlarmFailureCode.foreignTarget.rawValue
+        )
+        let foreignResult = try await foreignRead.execute(request)
+        XCTAssertFalse(foreignResult.success)
+        XCTAssertEqual(
+            foreignResult.output["error_code"]?.stringValue,
+            AlarmFailureCode.foreignTarget.rawValue
+        )
+        XCTAssertNil(foreignResult.output["native_schedule"])
+
+        let unavailableRead = AlarmReadExecutor(nativeStore: native, ownershipStore: nil)
+        let unavailablePreflight = try await unavailableRead.preflight(request)
+        XCTAssertEqual(
+            unavailablePreflight?.output["error_code"]?.stringValue,
+            AlarmFailureCode.ownershipStoreUnavailable.rawValue
+        )
+        let unavailableResult = try await unavailableRead.execute(request)
+        XCTAssertFalse(unavailableResult.success)
+        XCTAssertEqual(
+            unavailableResult.output["error_code"]?.stringValue,
+            AlarmFailureCode.ownershipStoreUnavailable.rawValue
+        )
+        XCTAssertNil(unavailableResult.output["native_schedule"])
     }
 
     func testBoundedEnumerationSeesTwoDistinctNativeAlarms() async throws {
@@ -1711,4 +1877,160 @@ final class AlarmExecutorsTests: XCTestCase {
         }
     }
 
+}
+
+
+extension AlarmExecutorsTests {
+    private func replacementFixture() async throws -> (FakeAlarmNativeStore, AlarmOwnershipStore, DeviceActionDispatch, UUID, URL) {
+        let dir = try directory()
+        let native = FakeAlarmNativeStore()
+        await native.setRejectExistingSchedule(true)
+        let store = try AlarmOwnershipStore(directoryURL: dir)
+        let result = try await AlarmCreateExecutor(nativeStore: native, ownershipStore: store, usageDescriptionAvailable: { true })
+            .execute(dispatch(actionType: "alarm.create", payload: weeklyPayload(), key: UUID().uuidString))
+        let id = try XCTUnwrap(UUID(uuidString: try XCTUnwrap(result.output["alarm_id"]?.stringValue)))
+        let update = dispatch(actionType: "alarm.update",
+            payload: updatePayload(alarmID: id, title: "更新后的闹钟", hour: 9, minute: 5, weekdays: ["tuesday"]),
+            key: UUID().uuidString, actionID: UUID().uuidString)
+        return (native, store, update, id, dir)
+    }
+
+    private func persistReplacement(_ request: DeviceActionDispatch, id: UUID,
+                                    store: AlarmOwnershipStore, phase: AlarmReplacementPhase) async throws {
+        let args = try XCTUnwrap(AlarmUpdateArguments.parse(request.payload))
+        _ = try await store.beginSettingsMutation(alarmID: id, mutationID: request.actionID, operation: .update,
+            beforeNativeState: .scheduled, requestedTitle: args.title,
+            requestedSchedule: args.schedule, requestedSound: args.sound)
+        _ = try await store.advanceReplacement(alarmID: id, mutationID: request.actionID, phase: phase)
+    }
+
+    func testUpdateCancelsAndVerifiesAbsenceBeforeSchedulingSameNativeID() async throws {
+        let (native, store, request, id, _) = try await replacementFixture()
+        let result = try await AlarmUpdateExecutor(nativeStore: native, ownershipStore: store).execute(request)
+        XCTAssertTrue(result.success)
+        let counts = await native.counts()
+        XCTAssertEqual(counts.cancel, 1)
+        XCTAssertEqual(counts.schedule, 2)
+        let owner = await store.record(alarmID: id)
+        XCTAssertEqual(owner?.schedule.hour, 9)
+        XCTAssertNil(owner?.pendingSettingsMutation)
+        XCTAssertEqual(owner?.lastSettingsMutationOutcome?.resolution, .completed)
+    }
+
+    func testReplacementScheduleFailureRestoresOldAlarmAndReportsFailure() async throws {
+        let (native, store, request, id, _) = try await replacementFixture()
+        await native.failNextSchedule(.nativeFailure("injected_configuration_failure"))
+        let result = try await AlarmUpdateExecutor(nativeStore: native, ownershipStore: store).execute(request)
+        XCTAssertFalse(result.success)
+        XCTAssertEqual(result.output["original_restored"]?.boolValue, true)
+        let owner = await store.record(alarmID: id)
+        XCTAssertEqual(owner?.schedule.hour, 7)
+        XCTAssertEqual(owner?.lifecycle, .accepted)
+        XCTAssertNil(owner?.pendingSettingsMutation)
+        XCTAssertEqual(owner?.lastSettingsMutationOutcome?.resolution, .failed)
+        let records = try await native.alarms()
+        XCTAssertTrue(owner?.schedule.matches(records.first?.schedule) == true)
+    }
+
+    func testReplacementCrashAfterOldRemovalResumesWithoutLyingNotStarted() async throws {
+        let (native, store, request, id, dir) = try await replacementFixture()
+        try await persistReplacement(request, id: id, store: store, phase: .schedulingReplacement)
+        await native.remove(id: id)
+        let reopened = try AlarmOwnershipStore(directoryURL: dir)
+        let executor = AlarmUpdateExecutor(nativeStore: native, ownershipStore: reopened)
+        let recovery = try await executor.reconcile(request, journalEntry: journalEntry(request))
+        XCTAssertEqual(recovery, .resumeAuthorizedOperation)
+        let before = await native.counts()
+        XCTAssertEqual(before.schedule, 1, "Read-only reconciliation cannot schedule")
+        let result = try await executor.execute(request)
+        XCTAssertTrue(result.success)
+        let after = await native.counts()
+        XCTAssertEqual(after.schedule, 2)
+        XCTAssertEqual(after.cancel, 0, "Already-absent original is not cancelled twice")
+    }
+
+    func testStoppingPartialReplacementDoesNotRecreateAnyAlarm() async throws {
+        let (native, store, original, id, _) = try await replacementFixture()
+        try await persistReplacement(original, id: id, store: store, phase: .schedulingReplacement)
+        await native.remove(id: id)
+        var stopped = original
+        stopped.reconciliationOnly = true
+        let outcome = try await AlarmUpdateExecutor(nativeStore: native, ownershipStore: store)
+            .reconcile(stopped, journalEntry: journalEntry(stopped))
+        guard case let .completed(result) = outcome else { return XCTFail("Stopped partial update must settle, not resume") }
+        XCTAssertFalse(result.success)
+        let counts = await native.counts()
+        XCTAssertEqual(counts.schedule, 1)
+        let owner = await store.record(alarmID: id)
+        XCTAssertNil(owner?.pendingSettingsMutation)
+        XCTAssertEqual(owner?.lifecycle, .missing)
+    }
+
+    func testTrustedManualCancellationSettlesLegacyUpdateWithoutResurrection() async throws {
+        let (native, store, original, id, _) = try await replacementFixture()
+        let entry = journalEntry(original)
+        let cancelledAt = entry.createdAt.addingTimeInterval(1)
+        _ = try await store.beginSettingsMutation(alarmID: id, mutationID: "settings.manual.cancel.test",
+                                                 operation: .cancel, beforeNativeState: .scheduled)
+        try await native.cancel(id: id)
+        _ = try await store.completeSettingsCancel(alarmID: id, mutationID: "settings.manual.cancel.test", now: cancelledAt)
+        var stopped = original
+        stopped.reconciliationOnly = true
+        let outcome = try await AlarmUpdateExecutor(nativeStore: native, ownershipStore: store).reconcile(stopped, journalEntry: entry)
+        guard case let .completed(result) = outcome else { return XCTFail("Trusted exact cancellation must settle") }
+        XCTAssertFalse(result.success)
+        XCTAssertEqual(result.output["native_absence_verified"]?.boolValue, true)
+        XCTAssertEqual(result.output["error_code"]?.stringValue, "alarm_update_superseded_by_cancel")
+        let counts = await native.counts()
+        XCTAssertEqual(counts.schedule, 1)
+    }
+
+    func testMissingNativeWithoutTrustedCancellationReceiptRemainsUnknown() async throws {
+        let (native, store, request, id, _) = try await replacementFixture()
+        await native.remove(id: id)
+        let outcome = try await AlarmUpdateExecutor(nativeStore: native, ownershipStore: store)
+            .reconcile(request, journalEntry: journalEntry(request))
+        guard case .stillUnknown = outcome else { return XCTFail("Absence alone cannot prove no earlier effect") }
+        let counts = await native.counts()
+        XCTAssertEqual(counts.schedule, 1)
+    }
+
+    func testRollbackPhaseSurvivesRelaunchAndRestoresOriginalOnly() async throws {
+        let (native, store, request, id, dir) = try await replacementFixture()
+        try await persistReplacement(request, id: id, store: store, phase: .restoringOriginal)
+        await native.remove(id: id)
+        let reopened = try AlarmOwnershipStore(directoryURL: dir)
+        let executor = AlarmUpdateExecutor(nativeStore: native, ownershipStore: reopened)
+        let outcome = try await executor.reconcile(request, journalEntry: journalEntry(request))
+        XCTAssertEqual(outcome, .resumeAuthorizedOperation)
+        let result = try await executor.execute(request)
+        XCTAssertFalse(result.success)
+        XCTAssertEqual(result.output["original_restored"]?.boolValue, true)
+        let owner = await reopened.record(alarmID: id)
+        XCTAssertEqual(owner?.schedule.hour, 7)
+        XCTAssertNil(owner?.pendingSettingsMutation)
+    }
+
+    func testNativeExecutionRetryCountPersistsAndMutationWriteFailureIsTransactional() async throws {
+        let dir = try directory()
+        let journal = try DeviceActionJournal(directoryURL: dir)
+        let request = dispatch(actionType: "device.probe", payload: [:])
+        _ = try await journal.prepare(request)
+        _ = try await journal.markMayHaveStarted(attemptID: request.attemptID)
+        _ = try await journal.markDefinitelyNotStarted(attemptID: request.attemptID)
+        _ = try await journal.markMayHaveStarted(attemptID: request.attemptID)
+        let reopened = try DeviceActionJournal(directoryURL: dir)
+        let persisted = await reopened.entry(attemptID: request.attemptID)
+        XCTAssertEqual(persisted?.executionCount, 2)
+        let url = dir.appendingPathComponent("device-action-journal.json")
+        try FileManager.default.removeItem(at: url)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        do {
+            _ = try await reopened.markDefinitelyNotStarted(attemptID: request.attemptID)
+            XCTFail("Expected persistence failure")
+        } catch {}
+        let after = await reopened.entry(attemptID: request.attemptID)
+        XCTAssertEqual(after?.state, .mayHaveStarted)
+        XCTAssertEqual(after?.executionCount, 2)
+    }
 }

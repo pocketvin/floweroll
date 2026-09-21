@@ -507,10 +507,33 @@ class CapabilityContextSelector:
         # tools. It is reconstructed from durable verified observations and
         # therefore survives Host restart without a separate cache.
         searches = [row for row in context.verified_observations if row.get("capability") == SEARCH_ID]
-        if searches:
+        # `verified_observations` is assembled from two durable sources: main
+        # Action observations first, then Work Unit receipts. Concatenation is
+        # intentionally not chronological, so `searches[-8:]` can make an old
+        # Work Unit page look newer than a just-completed standalone search.
+        # Discovery state already owns a compact, transactionally ordered page
+        # history. Use that as the recall source and keep observation fallback
+        # only for callers/tests that do not install durable discovery state.
+        durable_pages = [
+            page for page in (discovery_state.get("pages") or [])
+            if isinstance(page, dict)
+        ]
+        recent_pages = durable_pages[-8:]
+        if recent_pages:
+            recall_pages = [
+                {"ids": list(page.get("ids") or [])}
+                for page in recent_pages
+            ]
+        else:
+            recall_pages = [
+                {"ids": list(row.get("data", {}).get("selected_capability_ids", []) or [])}
+                for row in searches[-8:]
+            ]
+
+        if recall_pages:
             discovered: List[str] = []
-            for row in reversed(searches[-8:]):
-                for name in row.get("data", {}).get("selected_capability_ids", []):
+            for page in reversed(recall_pages):
+                for name in page["ids"]:
                     if name in by_id and name not in discovered:
                         discovered.append(name)
             ranked_ids = [spec.name for spec in ranked]
@@ -521,13 +544,14 @@ class CapabilityContextSelector:
                     discovery_order[name],
                 )
             )
-            # Preserve the top result of each recently requested subgoal rather
-            # than reranking every page solely against the original large goal.
-            # Recent results take precedence over already completed fast paths.
+            # Pin the head of each distinct recently requested subgoal in true
+            # durable chronology. The newest head is first and cannot be
+            # displaced by older appended Work Unit receipts or global-goal
+            # ranking. This is the capability the model just asked discovery to
+            # reveal, so the next turn must actually be able to use it.
             heads = []
-            for row in reversed(searches[-8:]):
-                ids = row.get('data', {}).get('selected_capability_ids', [])
-                head = next((name for name in ids if name in by_id
+            for page in reversed(recall_pages):
+                head = next((name for name in page["ids"] if name in by_id
                              and name not in {SEARCH_ID, 'work.execute'}), None)
                 if head and head not in heads:
                     heads.append(head)

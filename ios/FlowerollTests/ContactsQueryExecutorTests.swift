@@ -45,6 +45,8 @@ actor FakeContactsManagementClient: ContactsManagementClient {
     var preparedID = "created-contact-1"
     var createCommit: ContactsMutationReadback?
     var updateCommit: ContactsMutationReadback?
+    var createError: ContactsMutationClientError?
+    var updateError: ContactsMutationClientError?
     private(set) var prepareCount = 0
     private(set) var createCommitCount = 0
     private(set) var updateCommitCount = 0
@@ -64,6 +66,7 @@ actor FakeContactsManagementClient: ContactsManagementClient {
         desired: ContactsDesiredContact
     ) async throws -> ContactsMutationReadback {
         createCommitCount += 1
+        if let createError { throw createError }
         guard let createCommit else {
             throw ContactsMutationClientError.ambiguousReadback("fake create missing")
         }
@@ -81,6 +84,7 @@ actor FakeContactsManagementClient: ContactsManagementClient {
         desired: ContactsDesiredContact
     ) async throws -> ContactsMutationReadback {
         updateCommitCount += 1
+        if let updateError { throw updateError }
         guard let updateCommit else {
             throw ContactsMutationClientError.ambiguousReadback("fake update missing")
         }
@@ -247,6 +251,8 @@ extension FakeContactsManagementClient {
     func setCreatedReadback(_ readback: ContactsMutationReadback, for id: String) { createdReadbacks[id] = readback }
     func setValueForCreate(_ readback: ContactsMutationReadback?) { createCommit = readback }
     func setValueForUpdate(_ readback: ContactsMutationReadback?) { updateCommit = readback }
+    func setCreateError(_ error: ContactsMutationClientError?) { createError = error }
+    func setUpdateError(_ error: ContactsMutationClientError?) { updateError = error }
 }
 
 
@@ -330,9 +336,59 @@ final class ContactsManagementExecutorTests: XCTestCase {
             desiredDigest: String(repeating: "d", count: 64)
         )
         let second = ContactsCreateRecoveryStore(fileURL: url)
-        let restored = await second.record(for: "attempt-reload")
+        let restored = try await second.record(for: "attempt-reload")
         XCTAssertEqual(restored?.contactID, "native-reload-id")
         XCTAssertEqual(restored?.desiredDigest, String(repeating: "d", count: 64))
+    }
+
+    func testCorruptCreateRecoveryLedgerFailsClosedBeforePreparingAnotherContact() async throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("contacts-create-corrupt-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try Data("{not-json".utf8).write(to: url, options: .atomic)
+
+        let desired = desired()
+        let client = FakeContactsManagementClient()
+        let store = ContactsCreateRecoveryStore(fileURL: url)
+        let executor = ContactsCreateExecutor(client: client, recoveryStore: store)
+        let action = dispatch(
+            "contacts.create",
+            payload: payload(desired),
+            attemptID: "attempt-corrupt-recovery"
+        )
+
+        do {
+            _ = try await executor.execute(action)
+            XCTFail("corrupt recovery ledger must not be treated as an empty healthy ledger")
+        } catch let error as ContactsMutationClientError {
+            guard case .ambiguousReadback = error else {
+                return XCTFail("unexpected contacts error: \(error)")
+            }
+        }
+
+        let prepareCount = await client.prepareCount
+        let createCommitCount = await client.createCommitCount
+        XCTAssertEqual(prepareCount, 0)
+        XCTAssertEqual(createCommitCount, 0)
+
+        let now = Date()
+        let journal = DeviceActionJournalEntry(
+            attemptID: action.attemptID,
+            actionID: action.actionID,
+            idempotencyKey: action.idempotencyKey,
+            dispatchDigest: action.dispatchDigest,
+            state: .mayHaveStarted,
+            success: nil,
+            result: nil,
+            error: nil,
+            nativeCorrelationID: nil,
+            createdAt: now,
+            updatedAt: now
+        )
+        let reconciled = try await executor.reconcile(action, journalEntry: journal)
+        guard case .stillUnknown = reconciled else {
+            return XCTFail("corrupt recovery ledger must remain unknown during reconciliation")
+        }
     }
 
     func testCustomNativeMethodLabelsAreNotUpdateEligible() {
@@ -387,6 +443,23 @@ final class ContactsManagementExecutorTests: XCTestCase {
         XCTAssertEqual(replayReadCount, 1)
     }
 
+    func testCreateNativeSaveFailureRemainsAmbiguousForCoordinatorReconciliation() async throws {
+        let desired = desired()
+        let client = FakeContactsManagementClient()
+        await client.setCreateError(.nativeSaveFailed("simulated contacts write error"))
+        let executor = ContactsCreateExecutor(client: client, recoveryStore: tempRecoveryStore())
+        let action = dispatch("contacts.create", payload: payload(desired), attemptID: "attempt-create-native-error")
+
+        do {
+            _ = try await executor.execute(action)
+            XCTFail("native save failure after may-have-started must stay ambiguous")
+        } catch let error as ContactsMutationClientError {
+            guard case .nativeSaveFailed = error else {
+                return XCTFail("unexpected contacts error: \(error)")
+            }
+        }
+    }
+
     func testCreateOrphanedMayHaveStartedStaysUnknownAndDoesNotPrepareAgain() async throws {
         let desired = desired()
         let client = FakeContactsManagementClient()
@@ -435,6 +508,28 @@ final class ContactsManagementExecutorTests: XCTestCase {
         XCTAssertEqual(staleResult?.output["error_code"]?.stringValue, "CONTACTS_TARGET_STALE")
         let staleUpdateCount = await client.updateCommitCount
         XCTAssertEqual(staleUpdateCount, 0)
+    }
+
+    func testUpdateNativeSaveFailureRemainsAmbiguousForCoordinatorReconciliation() async throws {
+        let desired = desired()
+        let client = FakeContactsManagementClient()
+        let current = snapshot(id: "contact-native-error", desired: desired, revision: String(repeating: "a", count: 64))
+        await client.setManaged(current, for: "contact-native-error")
+        await client.setUpdateError(.nativeSaveFailed("simulated contacts update error"))
+        let executor = ContactsUpdateExecutor(client: client)
+        var updatePayload = payload(desired)
+        updatePayload["contact_id"] = .string("contact-native-error")
+        updatePayload["expected_revision"] = .string(String(repeating: "a", count: 64))
+        let action = dispatch("contacts.update", payload: updatePayload, attemptID: "attempt-update-native-error")
+
+        do {
+            _ = try await executor.execute(action)
+            XCTFail("native update failure after may-have-started must stay ambiguous")
+        } catch let error as ContactsMutationClientError {
+            guard case .nativeSaveFailed = error else {
+                return XCTFail("unexpected contacts error: \(error)")
+            }
+        }
     }
 
     func testUpdateSuccessAndReadOnlyReconciliationUseExactDesiredState() async throws {

@@ -215,7 +215,7 @@ class AlarmUpdateAdapter:
     source_kind = "ios"
     execution_profile = ExecutionProfile(
         timeout_seconds=20,
-        idempotency_mode="SAME_NATIVE_ID_RESCHEDULE",
+        idempotency_mode="SAME_NATIVE_ID_DURABLE_REPLACEMENT",
         retry_mode="SAFE_WITH_SAME_KEY",
         verification_mode="DEVICE_READ_BACK",
         reconciliation_mode="DEVICE_NATIVE_ID_READ_BACK",

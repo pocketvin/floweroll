@@ -98,6 +98,73 @@ extension RuntimeInteractionPolicyTests {
         XCTAssertEqual(task(id: "cancelled", status: "cancelled").presentationTruth.state, .cancelled)
     }
 
+    func testLifecycleInteractionAndDisplayStateRemainOrthogonal() {
+        let activeNeedsUser = presentationTask(
+            id: "active-needs-user",
+            status: "active",
+            needsUser: true
+        ).presentationTruth
+        XCTAssertEqual(activeNeedsUser.lifecycle, .active)
+        XCTAssertEqual(activeNeedsUser.interaction, .needsUserHint)
+        XCTAssertEqual(activeNeedsUser.state, .needsUser)
+
+        let activeClarification = presentationView(
+            id: "active-clarification",
+            status: "active",
+            updatedAt: "2026-09-12T10:00:00Z",
+            pendingInteraction: .object([
+                "kind": .string("clarification"),
+                "clarification_id": .string("clar-1"),
+                "question": .string("预算是多少？"),
+                "suggested_options": .array([]),
+                "accepts_text": .bool(true),
+            ])
+        ).presentationTruth
+        XCTAssertEqual(activeClarification.lifecycle, .active)
+        XCTAssertEqual(activeClarification.interaction, .clarification)
+        XCTAssertEqual(activeClarification.state, .needsUser)
+
+        let waiting = task(id: "waiting-none", status: "waiting").presentationTruth
+        XCTAssertEqual(waiting.lifecycle, .waiting)
+        XCTAssertEqual(waiting.interaction, .none)
+        XCTAssertEqual(waiting.state, .waiting)
+    }
+
+    func testDeviceExecutionEligibilityIsIndependentFromPresentationActivity() {
+        XCTAssertTrue(RuntimeTaskExecutionEligibilityPolicy.requiresDeviceExecution(
+            RuntimeTaskStateDimensions(status: "active")
+        ))
+        XCTAssertTrue(RuntimeTaskExecutionEligibilityPolicy.requiresDeviceExecution(
+            RuntimeTaskStateDimensions(status: "active", hasRawPendingInteraction: true)
+        ))
+        XCTAssertTrue(RuntimeTaskExecutionEligibilityPolicy.requiresDeviceExecution(
+            RuntimeTaskStateDimensions(status: "waiting")
+        ))
+        XCTAssertFalse(RuntimeTaskExecutionEligibilityPolicy.requiresDeviceExecution(
+            RuntimeTaskStateDimensions(status: "waiting", hasRawPendingInteraction: true)
+        ))
+        XCTAssertFalse(RuntimeTaskExecutionEligibilityPolicy.requiresDeviceExecution(
+            RuntimeTaskStateDimensions(status: "blocked")
+        ))
+        XCTAssertFalse(RuntimeTaskExecutionEligibilityPolicy.requiresDeviceExecution(
+            RuntimeTaskStateDimensions(status: "blocked", hasRawPendingInteraction: true)
+        ))
+        XCTAssertFalse(RuntimeTaskExecutionEligibilityPolicy.requiresDeviceExecution(
+            RuntimeTaskStateDimensions(status: "completed")
+        ))
+        XCTAssertFalse(RuntimeTaskExecutionEligibilityPolicy.requiresDeviceExecution(
+            RuntimeTaskStateDimensions(status: "needs_user")
+        ))
+        let unknown = RuntimeTaskStateDimensions(status: "future_status")
+        XCTAssertEqual(unknown.lifecycle, .unknown)
+        XCTAssertEqual(
+            unknown.displayState,
+            .paused,
+            "unknown Host lifecycle must not masquerade as an active Task"
+        )
+        XCTAssertFalse(RuntimeTaskExecutionEligibilityPolicy.requiresDeviceExecution(unknown))
+    }
+
     func testTerminalTruthAbsorbsNeedsUserAndPendingInteractionHints() {
         XCTAssertEqual(
             RuntimeTaskPresentationTruth.taskStatus(
@@ -112,6 +179,8 @@ extension RuntimeInteractionPolicyTests {
             pendingInteraction: .object(["kind": .string("clarification")])
         )
         XCTAssertEqual(completedWithStalePending.presentationTruth.state, .completed)
+        XCTAssertEqual(completedWithStalePending.presentationTruth.lifecycle, .completed)
+        XCTAssertEqual(completedWithStalePending.presentationTruth.interaction, .none)
     }
 
     func testHomeComposerExecutionStopPolicyOnlyStopsActiveExecution() {

@@ -688,7 +688,28 @@ def register_task_material_capabilities(registry: CapabilityRegistry, assets: Ta
         spec=CapabilitySpec(name=name,description=description,arguments_schema={'type':'object','properties':props,'required':required,'additionalProperties':False},post_verify_mode=post_verify_mode)
         timeout_seconds = 240 if name == 'document.scan_pdf' else 180
         max_attempts = 1 if name == 'document.scan_pdf' else 2
-        registry.register(RegisteredCapability(spec=spec,adapter=FunctionToolAdapter(capability_id=name,source_kind='task_material',read_only=read_only,timeout_seconds=timeout_seconds,max_attempts=max_attempts),source=CapabilitySourceTarget(kind='task_material',tool_name=name,metadata={'execution_plane':'host','foreground_policy':'background_only','effect':'read' if read_only else 'local_file'}),tags=('materials','document','deliverable'),loading='always_visible'))
+        registry.register(RegisteredCapability(
+            spec=spec,
+            adapter=FunctionToolAdapter(
+                capability_id=name,
+                source_kind='task_material',
+                read_only=read_only,
+                replay_safe=not read_only,
+                timeout_seconds=timeout_seconds,
+                max_attempts=max_attempts,
+            ),
+            source=CapabilitySourceTarget(
+                kind='task_material',
+                tool_name=name,
+                metadata={
+                    'execution_plane':'host',
+                    'foreground_policy':'background_only',
+                    'effect':'read' if read_only else 'local_file',
+                },
+            ),
+            tags=('materials','document','deliverable'),
+            loading='always_visible',
+        ))
         def scoped(dispatch, args, fn=fn):
             token = current_dispatch.set(dispatch)
             try:

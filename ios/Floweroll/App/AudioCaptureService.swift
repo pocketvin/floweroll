@@ -301,21 +301,25 @@ final class AudioCaptureService {
 
         if tapInstalled {
             input.removeTap(onBus: 0)
+            tapInstalled = false
         }
-        input.installTap(
-            onBus: 0,
-            bufferSize: 1024,
-            format: naturalFormat,
-            block: makeMicrophoneTapBlock(bridge: bridge)
-        )
-        tapInstalled = true
 
         do {
+            try input.__installTap(
+                onBus: 0,
+                bufferSize: 1024,
+                format: naturalFormat,
+                error: (),
+                block: makeMicrophoneTapBlock(bridge: bridge)
+            )
+            tapInstalled = true
             engine.prepare()
             try engine.start()
         } catch {
-            input.removeTap(onBus: 0)
-            tapInstalled = false
+            if tapInstalled {
+                input.removeTap(onBus: 0)
+                tapInstalled = false
+            }
             audioBridge = nil
             transcriptionHandler = nil
             try? session.setActive(false, options: .notifyOthersOnDeactivation)

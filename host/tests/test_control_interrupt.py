@@ -301,7 +301,7 @@ class ControlInterruptTests(unittest.TestCase):
         self.assertEqual(store.get_action_attempt(dispatch["attempt_id"])["source_operation_ref"], "provider-task-123")
 
     def test_unknown_interrupted_action_reconciles_absent_without_retry(self) -> None:
-        store, task, action, execution, _ = self.make_inflight()
+        store, task, action, execution, dispatch = self.make_inflight()
         execution.mark_current_attempt_unknown(
             task_id=task["task_id"],
             action_id=action["action_id"],
@@ -321,6 +321,44 @@ class ControlInterruptTests(unittest.TestCase):
         self.assertEqual(store.get_action(action["action_id"])["status"], "cancelled")
         self.assertEqual(len(store.action_attempts(action["action_id"])), 1)
         self.assertEqual(store.get_runtime_state(task["task_id"])["phase"], "planning")
+        self.assertEqual(store.get_action_attempt(dispatch["attempt_id"])["latest_outcome"], "CANCELLED")
+
+    def test_device_not_started_proof_finishes_control_interrupt_without_retry(self) -> None:
+        from floweroll_host.agent_loop import AgentLoop
+
+        store = Storage(":memory:")
+        loop = AgentLoop(store)
+        task = loop.create_task("执行设备操作")
+        action = store.get_open_action(task["task_id"])
+        assert action is not None
+        dispatch = loop.next_action(task["task_id"])
+        assert dispatch is not None
+
+        self.admit_turn(store, task["task_id"], "stop-device-action", "别继续这个操作了")
+        basis = store.control_interrupt_basis(task["task_id"])
+        assert basis is not None
+        self.apply(store, basis, intent="INTERRUPT_CURRENT_ACTION")
+
+        result = loop.execution.reconcile_device_definitely_not_started(
+            task_id=task["task_id"],
+            action_id=action["action_id"],
+            attempt_id=dispatch["attempt_id"],
+        )
+        self.assertFalse(result["duplicate"])
+        self.assertEqual(result["task"]["status"], "active")
+        self.assertEqual(result["action"]["status"], "cancelled")
+        self.assertEqual(store.get_runtime_state(task["task_id"])["phase"], "planning")
+        self.assertEqual(len(store.action_attempts(action["action_id"])), 1)
+        self.assertEqual(
+            store.get_action_attempt(dispatch["attempt_id"])["latest_outcome"],
+            "CANCELLED",
+        )
+
+        replay = loop.execution.reconcile_device_definitely_not_started(
+            task_id=task["task_id"], action_id=action["action_id"],
+            attempt_id=dispatch["attempt_id"],
+        )
+        self.assertTrue(replay["duplicate"])
 
 
 class ControlInterruptSupervisorTests(unittest.TestCase):

@@ -1,6 +1,6 @@
 # 花卷 / floweroll — 现行架构与实现事实
 
-更新：2026-09-15
+更新：2026-09-20
 
 这份文档是**当前源码架构的唯一总览**。它回答“现在小卷实际上由什么组成、数据怎么流、状态存在哪里、Task Mode 和 Observation Mode 各自怎么运行”。
 
@@ -97,7 +97,7 @@ Task Mode 的主要输入来源包括：
 - cancellation；
 - 设备原生执行结果。
 
-全局 Home / Action Button 输入采用 **new-task-by-default**：仅存在活动 Task 不足以把下一条用户输入捕获为 continuation。Task/Thread 详情中的输入则天然属于该 Thread。
+全局 Home / Action Button 输入采用 **new-task-by-default**：仅存在活动 Task 不足以把下一条用户输入捕获为 continuation。Task/Thread 详情中的输入则天然属于该 Thread。若 Home 当前 Thread 存在 typed pending clarification，GlobalInputRouting 只在文本与 pending 对象同域且含明确流程控制语义时把较长自由文本绑定到该 clarification；无关完整目标和显式“新任务”标记仍走新 Task，避免 needs-user 回复误开任务与全局输入误吞之间互相回归。
 
 ### 4.2 核心数据流
 
@@ -229,7 +229,14 @@ Graph 不持有 Task truth，不执行 Tool / iOS Action，不使用 ToolNode、
 
 证据投影只修改送给模型的副本：去除与 structured_content 完全相等的 MCP 文本包、已完整展开子回执的重复批次状态和重复 DOCX 段落；保留失败/未载入子项、精确 ID、原生写入核验与用户约束。长检索文本用结构化片段和显式截断标记表示，不再截断整个 JSON 字符串。原始回执仍在存储中。正常与恢复模式都保留 Mem0；恢复时不额外调用一个 LLM 做摘要。
 
+检索证据投影具有幂等标记与文本预算：ContextBuilder 和 Graph 再次处理 `text_excerpts` 时必须保留正文。Exa 文本块与 structured MCP 结果按来源分配片段预算，保留来源与事实对应关系；工具回执的 verified 只证明执行/结构核验，不保证网页事实实时或正确。DOCX inspect 支持 `text_offset / total_chars / next_text_offset`；模型可见片段被进一步缩短时，`planner_next_read` 从实际可见正文末尾继续，不能跳过隐藏段落。同一不可变文件、哈希和读取窗口的重复回执只保留一份正文及引用，不膨胀上下文。
+复杂任务的模型工作集还会在 capability selector 之后聚合 discovery 历史：完整能力目录不重复进入模型请求，只保留近期关键词/分页进度；酒店查询保留区域、价格范围、代表候选和 POI 匹配可信度，完整候选仍在 durable receipt；天气去除重复 transport envelope；Mem0 只保留少量高相关短摘要。已完全展开为 child receipts 的成功 work.execute 父回执不再重复进入最终 prompt，但失败、blocked、pending unit 永远保留。
+
+复合任务中，只读 `web.fetch / web.search / docs.query` 的临时失败在来源重试耗尽后以失败 Attempt 和明确原因返回 Planner，允许换来源或推进其他工作；不伪造成功证据、不关闭 TLS 校验。单次交付型读取和写操作仍沿用各自终止边界。
+
 Graph 节点事件写入本机 `planner.graph.node`，每次 `planner.call.metrics.graph_steps` 汇总节点耗时、错误类型和上下文大小。开发观察台现有 Planner → Metrics 可读取；未新增独立 Graph UI。Graph 调用显式禁用 LangSmith 自动 tracing，不能因继承环境变量把 Task/Memory 导出到新服务。
+
+当前 Kimi K3 Planner 每轮只做一项“下一步语义决策”，Host 因而显式使用 API 顶层 `reasoning_effort=low`；K3 官方默认 `max` 对这种短决策会带来不必要的思考延迟。可通过 `FLOWEROLL_PLANNER_REASONING_EFFORT=high|max` 显式提高，非 K3 模型不会收到该 Provider 专用字段。`max_completion_tokens` 仍单独控制生成上限，不能用大输出预算替代 reasoning effort。
 
 
 相关文件：
@@ -242,6 +249,8 @@ Graph 节点事件写入本机 `planner.graph.node`，每次 `planner.call.metri
 - `host/floweroll_host/planner_compaction.py`
 
 ### 能力上下文
+
+Task capability policy 将发现用 domain 与原生实体 family 分开；calendar、reminder、alarm、contacts、notify 不再因共享 device 域而相互误伤。只有用户正向声明的准确标题才能形成“除此之外不创建”的例外，歧义保持拒绝。发现层可暴露带限制的能力，Planner 接纳与执行前再次校验参数和已完成创建记录；例外不等于放开整类写入。
 
 Registry 可以很大，但单次 Planner 只应看到小的工作集：
 
@@ -299,6 +308,10 @@ Source
 
 统一保留：Action identity、Attempt、timeout/retry policy、verification、reconciliation、Observation。
 
+对于 iPhone 原生副作用，`UNKNOWN` 只表示“是否已经越过副作用边界仍不确定”，不能直接重试。停止或取消后的 reconciliation 如果由设备 journal/readback 明确证明 exact Attempt **没有开始副作用**，iPhone 只提交该证明，不重新执行；Host 将该 Attempt 收口为 `CANCELLED`，并完成 Task cancellation 或 Action interrupt。此后任何迟到 result 只能作为 duplicate 处理，不能把已证明未发生的副作用重新改写成成功 Observation。
+
+设备本地缺少 journal 记录不构成“未开始”的证明；只有 durable `received` 状态，或 `mayHaveStarted` 之后经过 native readback 得到 `definitelyNotStarted`，才能走上述收口。
+
 ## 9. 当前 iPhone 原生语义能力
 
 `host/floweroll_host/capabilities_v0.py` 的 `product_native_capabilities()` 当前包含：
@@ -333,6 +346,10 @@ Source
 - `alarm.cancel`
 
 使用 AlarmKit，管理小卷能够证明 ownership 的闹钟。
+
+`alarm.update` 与设置页使用同一持久化配置替换路径，而不是对仍存在的 ID 再次调用 `schedule`：先保存原配置和目标配置，再 cancel → 精确 ID 不存在读回 → 使用同一 ID schedule 新配置 → 读回 → 提交 ownership。阶段分为 removingOriginal、schedulingReplacement、restoringOriginal；新配置失败时尽量恢复原配置，回滚失败则明确报告缺失，不能展示成功。原生重试计数随本机日志持久化并有上限。
+
+中断后的恢复先读取阶段与系统状态；已发生部分操作的事务用 `resumeAuthorizedOperation` 续执行，不能伪称 definitelyNotStarted。收到停止请求后只核对和收尾，不自动重建被移除的闹钟。对于旧 `mayHaveStarted` update，若存在时间顺序匹配的可信 ownership 取消回执，且该 native ID 确认不存在，则以“已被取消取代”的失败结果结算旧 Attempt，让 Host 完成取消并释放 tracking；未知缺失不套用这条规则。
 
 ### 日历
 
@@ -389,6 +406,7 @@ iOS 执行实现主要位于 `ios/Floweroll/App/RuntimeClient/`。
 - 上传显示接入 `didSendBodyData`，使用本次请求实际发送字节加已确认前缀；回前台读取系统任务字节数恢复显示。网络发送进度不是完成凭据，全部发送后仍要等待 Host receipt；
 - 成功查询上传元数据不能重置失败预算；只有 Host 已确认 offset 前进才重置。TLS/隧道中断与 App 挂起必须分别诊断，系统后台传输并不保证网络始终可用；
 - loopback/测试环境保留普通 URLSession 路径；后台 transport 不取得 Task lifecycle、LongRunningIntent 或 Live Activity ownership；
+- 文件提交先核对 Host receipt 的 ID、长度和 SHA；已验证的文件不再要求打开本地原件，只有实际需要传输时才检查本地字节；
 - 发送取消与 submission 对账；
 - 消息级附件归属；
 - 结果预览、分享、Files/Photos 保存。
@@ -547,10 +565,14 @@ Action Button / Siri / Shortcut / 其他系统入口
 - 两种系统 owner 的进度都来自 durable admission 与 Host verified `work_summary` / semantic status，不使用按时间增长的假进度。`needs_user` 不是业务完成，Host terminal truth 优先于迟到 interaction。
 - `blocked` 也不等于 `needs_user`：只有真实 pending clarification / action input 才进入“需要你”。`planner_runtime_error` 投影为非终态“已暂停”；用户显式“重新尝试”通过同一 Task 的 `POST /v1/tasks/{task_id}/retry` 写入 `task.operator_resumed` 并恢复 planning，不伪造 UserTurn、不创建新 Task，也不对权限/业务限制类 blocked 强行重试。
 - `BGProcessingTask` 是不占产品展示的补偿恢复通道；具体启动时间由 iOS 决定，`earliestBeginDate` 不是执行时间承诺。
+- App active lifecycle 通过可合并的 `recoverForegroundWork` 恢复 outbox 和本机执行；普通列表进入、下拉刷新与只读 presentation index 不拥有副作用执行。未完成附件不阻塞已就绪的独立提交；恢复复用原 submission/event ID，不把自动恢复冒充新的用户操作申请 BGCPT。
+- 隐藏/删除的 Task 不出现在 Inbox 或完成提示，但真实未收尾状态仍保留供恢复。前台依据持久隐藏集合补交稳定 ID 的真实取消请求；已知无外部写入的原生查询可直接取消，未知或已开始的写入必须继续 reconciliation。稳定状态释放时同时清理 durable 和 continued 集合。
 - 上传的数据平面独立使用 system-owned background URLSession；BGCPT / LongRunningIntent 都不接管附件字节传输 ownership。
 - 系统上传唤醒后的补交接有有限预算；超时会交还系统 completion handler 并保留后续恢复，不把整个 Task 判失败。
 - 取消发送先撤销 outbox 重放资格，再按确切编号核对已接收的 Host Task；普通传输失败保留原编号。进程内已确认编号仅用于消除前后台同时接收 ACK 的误取消，不是另一份 Task 状态。
 - 带有效 `pending_interaction` 的任务不执行未授权后续动作，也不被记成完成；Host 终态优先于迟到的 interaction 投影。
+- 破坏性操作的确认必须绑定 fresh target/readback。若用户在旧 clarification 中明确要求“先做前置检查，真正删除时再确认”，Runtime 会把 Planner 的 `KEEP` deterministic reground 为 `CANCEL`，关闭旧确认；后续删除仍必须基于 fresh identity/revision 生成新的 `ACTION_INPUT`，不能把旧 clarification 或这条延期指令当成删除授权。
+- 确认 ownership 由真实 Adapter 决定：Host 将实现 `predispatch_confirmation` 的当前可用能力注入 Planner runtime context。对这类能力，Planner 在 exact 参数已由 verified evidence 提供后直接规划 Action，不先用 CLARIFY 询问批准；ExecutionRuntime 在创建 Attempt 前生成 binding-aware `ACTION_INPUT`，因此一次写操作只有一个权威确认面。
 - App 被系统暂停、网络断开、用户强制退出或权限需要前台时，不承诺 iPhone 任意代码无限运行；Host 上已接收的工作与本机原生步骤分别遵循各自执行条件。
 - Host → APNs 远程更新仍暂缓，未新增 Push entitlement、token 注册或 provider。
 
@@ -697,7 +719,7 @@ Observation history 与普通 Task history 在 Tasks 页面统一排序展示，
 目前不为了“框架成熟度”进行以下大迁移：
 
 - 不整体迁 TCA；
-- 不整体迁 Temporal/LangGraph；
+- Planner 已使用 LangGraph；不把 durable Task Runtime / Action / Attempt / verification truth 整体迁入 Temporal 或 LangGraph；
 - 不迁官方 MCP Python SDK；
 - 不接 DeepEval；
 - 不因为使用 Mem0 就把 Memory 当 TaskState；

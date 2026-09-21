@@ -79,6 +79,7 @@ class TaskCapabilityPolicyParserTests(unittest.TestCase):
                     capability_id=write_spec.name,
                     source_kind="host_local",
                     read_only=False,
+                    replay_safe=True,
                 ),
                 source=CapabilitySourceTarget(
                     kind="host_local",

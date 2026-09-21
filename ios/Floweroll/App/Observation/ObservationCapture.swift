@@ -74,7 +74,7 @@ final class ObservationAudioFeeder: @unchecked Sendable {
     }
     func consume(_ sample: CMSampleBuffer) {
         guard CMSampleBufferDataIsReady(sample), let desc = CMSampleBufferGetFormatDescription(sample),
-              let sourceFormat = AVAudioFormat(cmAudioFormatDescription: desc) as AVAudioFormat?,
+              let sourceFormat = AVAudioFormat(formatDescription: desc),
               sourceFormat.channelCount > 0 else { return }
         let frames = CMSampleBufferGetNumSamples(sample)
         guard frames > 0, frames <= 65536,
@@ -511,7 +511,14 @@ final class ObservationCaptureEngine: NSObject, ObservationCaptureDriver, SCCont
             let input = engine.inputNode
             let format = input.outputFormat(forBus: 0)
             guard format.channelCount > 0, format.sampleRate > 0 else { throw FlowerollPrototypeError.audioInputUnavailable }
-            input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in feeder.consume(buffer) }
+            try input.__installTap(
+                onBus: 0,
+                bufferSize: 1024,
+                format: format,
+                error: ()
+            ) { buffer, _ in
+                feeder.consume(buffer)
+            }
             engine.prepare(); try engine.start()
         }
     }

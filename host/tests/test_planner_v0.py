@@ -5,7 +5,7 @@ import unittest
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from floweroll_host.capabilities_v0 import REMINDER_CREATE, WEATHER_QUERY
+from floweroll_host.capabilities_v0 import REMINDER_CREATE, REMINDER_REMOVE, WEATHER_QUERY
 from floweroll_host.context_builder import ContextBuilder
 from floweroll_host.planner_contracts import PlannerDecision, planner_decision_schema
 from floweroll_host.planner_request import PLANNER_SYSTEM_INSTRUCTIONS_V0, PlannerRequestBuilder
@@ -95,6 +95,27 @@ class PlannerV0ContractTests(unittest.TestCase):
         self.assertIn("model-correctable semantic failure", joined)
         self.assertIn("Capability discovery", joined)
         self.assertIn("Task materials", joined)
+
+    def test_runtime_owned_confirmation_guidance_prevents_planner_double_prompt(self) -> None:
+        context = ContextBuilder().build(
+            task_id="task-runtime-confirmation",
+            raw_goal="删除这条提醒，删除前确认",
+            current_time=datetime(2026, 9, 10, 3, 30, tzinfo=ZoneInfo("Asia/Shanghai")),
+            timezone_name="Asia/Shanghai",
+            policy_view={"allowed_capabilities": [REMINDER_REMOVE.name]},
+            capabilities=[REMINDER_REMOVE],
+            runtime_context={
+                "invocation_source": "unit_test",
+                "predispatch_confirmation_capabilities": [REMINDER_REMOVE.name],
+            },
+        )
+        request = PlannerRequestBuilder().build(context)
+        visible = json.loads(request["input"][1]["content"])["decision_context"]
+        joined = "\n".join(visible["planner_guidance"])
+        self.assertIn("Runtime-bound confirmation owns approval", joined)
+        self.assertIn("reminder.remove", joined)
+        self.assertIn("Do not CLARIFY merely to ask", joined)
+        self.assertIn("ACTION_INPUT", joined)
 
     def test_execute_decision_validates_capability_arguments(self) -> None:
         decision = PlannerDecision.from_dict(

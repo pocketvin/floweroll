@@ -30,8 +30,12 @@ class DeviceActionWaitTests(unittest.TestCase):
         self.thread.join(timeout=2)
         self.tmp.cleanup()
 
-    def request(self, path: str):
-        req = urllib.request.Request(self.base + path, method="GET")
+    def request(self, path: str, *, method: str = "GET", body=None):
+        data = None if body is None else json.dumps(body).encode()
+        headers = {"Content-Type": "application/json"} if data is not None else {}
+        req = urllib.request.Request(
+            self.base + path, data=data, headers=headers, method=method
+        )
         try:
             with urllib.request.urlopen(req, timeout=4) as response:
                 data = response.read()
@@ -107,6 +111,61 @@ class DeviceActionWaitTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(dispatch['reconciliation_only'])
         self.assertEqual(dispatch['attempt_id'], original['attempt_id'])
+
+    def test_device_definitely_not_started_http_finalizes_pending_cancel_idempotently(self):
+        app = self.server.app
+        app.storage.create_task(
+            'cancel-reconcile', 'execute device operation', 'test', {}, status='active'
+        )
+        app.storage.create_action(
+            action_id='cancel-reconcile-action',
+            task_id='cancel-reconcile',
+            step_index=1,
+            action_type='device.probe',
+            payload={'message': 'ready'},
+            expected={},
+            idempotency_key='cancel-reconcile:1',
+            on_verified='COMPLETE',
+        )
+        dispatch = app.execution.next_action('cancel-reconcile', source_kind='ios')
+        self.assertIsNotNone(dispatch)
+        app.storage.admit_cancel_request(
+            task_id='cancel-reconcile',
+            event_id='cancel-reconcile-event',
+            reason='stop',
+        )
+        app.storage.consume_cancel_request(event_id='cancel-reconcile-event')
+
+        path = (
+            '/v1/tasks/cancel-reconcile/actions/cancel-reconcile-action/'
+            'reconciliations/definitely-not-started'
+        )
+        wrong_status, wrong = self.request(
+            path,
+            method='POST',
+            body={'attempt_id': 'wrong-attempt'},
+        )
+        self.assertEqual(wrong_status, 404)
+        self.assertEqual(wrong['code'], 'ACTION_ATTEMPT_NOT_FOUND')
+
+        status, body = self.request(
+            path,
+            method='POST',
+            body={'attempt_id': dispatch['attempt_id']},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(body['task']['status'], 'cancelled')
+        self.assertEqual(body['action']['status'], 'cancelled')
+        self.assertEqual(len(app.storage.action_attempts('cancel-reconcile-action')), 1)
+
+        replay_status, replay = self.request(
+            path,
+            method='POST',
+            body={'attempt_id': dispatch['attempt_id']},
+        )
+        self.assertEqual(replay_status, 200)
+        self.assertEqual(replay['task']['status'], 'cancelled')
+        self.assertEqual(len(app.storage.action_attempts('cancel-reconcile-action')), 1)
 
 
 if __name__ == "__main__":

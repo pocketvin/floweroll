@@ -131,6 +131,25 @@ def main() -> int:
     planner_max_completion_tokens_raw = os.environ.get(
         "FLOWEROLL_PLANNER_MAX_COMPLETION_TOKENS", ""
     ).strip()
+    planner_reasoning_effort_raw = os.environ.get(
+        "FLOWEROLL_PLANNER_REASONING_EFFORT", ""
+    ).strip().lower()
+    planner_reasoning_effort = planner_reasoning_effort_raw or None
+    if planner_reasoning_effort is None and planner_model.lower() in {"kimi-k3", "k3"}:
+        # Floweroll Planner makes one bounded next-step decision per call. K3
+        # defaults to max reasoning, which adds large latency without owning the
+        # durable multi-step plan. Keep max/high opt-in through the environment.
+        planner_reasoning_effort = "low"
+    if planner_reasoning_effort is not None:
+        if planner_model.lower() not in {"kimi-k3", "k3"}:
+            raise SystemExit(
+                "FLOWEROLL_PLANNER_REASONING_EFFORT is currently supported only for Kimi K3"
+            )
+        if planner_reasoning_effort not in {"low", "high", "max"}:
+            raise SystemExit(
+                "FLOWEROLL_PLANNER_REASONING_EFFORT must be low, high, or max for Kimi K3"
+            )
+
     planner_max_completion_tokens = None
     if planner_max_completion_tokens_raw:
         try:
@@ -171,6 +190,7 @@ def main() -> int:
             model=planner_model,
             base_url=planner_base_url,
             max_completion_tokens_override=planner_max_completion_tokens,
+            reasoning_effort_override=planner_reasoning_effort,
         )
         task_runtime_factory = lambda store: TaskRuntime(
             store,

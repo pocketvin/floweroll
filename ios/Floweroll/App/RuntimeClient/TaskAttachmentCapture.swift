@@ -7,7 +7,7 @@ import UIKit
 import Vision
 
 
-enum TaskAttachmentCaptureMode: String, Identifiable {
+enum TaskAttachmentCaptureMode: String, Identifiable, Sendable {
     case photo
     case document
     var id: String { rawValue }
@@ -189,9 +189,16 @@ struct DocumentLiveDetectionState: Equatable {
 
 
 final class DocumentLiveRectangleDetector: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
+    typealias Callback = @Sendable (DocumentRectangleCorners?) -> Void
+
     private let queue = DispatchQueue(label: "floweroll.document-live-rectangle", qos: .userInitiated)
     private var lastAnalysisUptime: TimeInterval = 0
-    var onRectangle: ((DocumentRectangleCorners?) -> Void)?
+    private let onRectangle: Callback
+
+    init(onRectangle: @escaping Callback) {
+        self.onRectangle = onRectangle
+        super.init()
+    }
 
     func attach(to output: AVCaptureVideoDataOutput) {
         output.alwaysDiscardsLateVideoFrames = true
@@ -207,12 +214,12 @@ final class DocumentLiveRectangleDetector: NSObject, AVCaptureVideoDataOutputSam
         guard now - lastAnalysisUptime >= 0.22 else { return }
         lastAnalysisUptime = now
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
-            onRectangle?(nil)
+            onRectangle(nil)
             return
         }
 
         let rectangle = Self.bestRectangle(in: pixelBuffer).map(DocumentRectangleCorners.init)
-        onRectangle?(rectangle)
+        onRectangle(rectangle)
     }
 
     private static func bestRectangle(in pixelBuffer: CVPixelBuffer) -> VNRectangleObservation? {
@@ -244,23 +251,153 @@ final class DocumentLiveRectangleDetector: NSObject, AVCaptureVideoDataOutputSam
 }
 
 
+private final class TaskAttachmentCameraSessionOwner: @unchecked Sendable {
+    let session = AVCaptureSession()
+
+    private let photoOutput = AVCapturePhotoOutput()
+    private let videoOutput = AVCaptureVideoDataOutput()
+    private let queue = DispatchQueue(label: "floweroll.attachment-camera.session")
+    private var requestedPhotoDimensions: CMVideoDimensions?
+    private let stateLock = NSLock()
+    private var _wantsRunning = true
+    private var configured = false
+
+    func configure(
+        mode: TaskAttachmentCaptureMode,
+        documentRectangleDetector: DocumentLiveRectangleDetector,
+        completion: @escaping @MainActor @Sendable (Bool) -> Void
+    ) {
+        queue.async { [self] in
+            guard wantsRunning else { return }
+            guard !configured else {
+                let ready = session.isRunning
+                Task { @MainActor in completion(ready) }
+                return
+            }
+
+            session.beginConfiguration()
+            session.sessionPreset = .photo
+            guard let camera = AVCaptureDevice.default(
+                .builtInWideAngleCamera,
+                for: .video,
+                position: .back
+            ),
+            let input = try? AVCaptureDeviceInput(device: camera),
+            session.canAddInput(input),
+            session.canAddOutput(photoOutput)
+            else {
+                session.commitConfiguration()
+                Task { @MainActor in completion(false) }
+                return
+            }
+
+            session.addInput(input)
+            session.addOutput(photoOutput)
+            if mode == .document, session.canAddOutput(videoOutput) {
+                session.addOutput(videoOutput)
+                documentRectangleDetector.attach(to: videoOutput)
+            }
+            if let dimensions = Self.preferredPhotoDimensions(
+                mode: mode,
+                supported: camera.activeFormat.supportedMaxPhotoDimensions
+            ) {
+                photoOutput.maxPhotoDimensions = dimensions
+                requestedPhotoDimensions = dimensions
+            }
+            // Physical iPhone rejects startRunning while the configuration
+            // transaction is still open.
+            session.commitConfiguration()
+            configured = true
+
+            guard wantsRunning else { return }
+            session.startRunning()
+            Task { @MainActor in completion(true) }
+        }
+    }
+
+    func stop() {
+        stateLock.lock()
+        _wantsRunning = false
+        stateLock.unlock()
+        queue.async { [self] in
+            if session.isRunning {
+                session.stopRunning()
+            }
+        }
+    }
+
+    func capturePhoto<Delegate>(
+        delegate: Delegate,
+        unavailable: @escaping @MainActor @Sendable () -> Void
+    ) where Delegate: AVCapturePhotoCaptureDelegate & Sendable {
+        queue.async { [self] in
+            guard configured, wantsRunning, session.isRunning else {
+                Task { @MainActor in unavailable() }
+                return
+            }
+            let settings = AVCapturePhotoSettings()
+            // AVCapturePhotoOutput defaults to .balanced. Requesting .quality
+            // without opting the output into that level throws on physical iPhone.
+            settings.photoQualityPrioritization = .balanced
+            if let requestedPhotoDimensions {
+                settings.maxPhotoDimensions = requestedPhotoDimensions
+            }
+            photoOutput.capturePhoto(with: settings, delegate: delegate)
+        }
+    }
+
+    private var wantsRunning: Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return _wantsRunning
+    }
+
+    private static func preferredPhotoDimensions(
+        mode: TaskAttachmentCaptureMode,
+        supported: [CMVideoDimensions]
+    ) -> CMVideoDimensions? {
+        guard !supported.isEmpty else { return nil }
+        if mode == .document {
+            return supported.max { lhs, rhs in
+                Int64(lhs.width) * Int64(lhs.height) < Int64(rhs.width) * Int64(rhs.height)
+            }
+        }
+
+        // Ordinary camera sessions retain several compressed captures in memory
+        // until the user taps Done. Keep each request around 12 MP when possible.
+        let ordinaryPixelBudget: Int64 = 13_000_000
+        let bounded = supported.filter {
+            Int64($0.width) * Int64($0.height) <= ordinaryPixelBudget
+        }
+        if bounded.isEmpty {
+            return supported.min { lhs, rhs in
+                Int64(lhs.width) * Int64(lhs.height) < Int64(rhs.width) * Int64(rhs.height)
+            }
+        }
+        return bounded.max { lhs, rhs in
+            Int64(lhs.width) * Int64(lhs.height) < Int64(rhs.width) * Int64(rhs.height)
+        }
+    }
+}
+
+
 final class TaskAttachmentCaptureViewController: UIViewController, @preconcurrency AVCapturePhotoCaptureDelegate, @unchecked Sendable {
     private let mode: TaskAttachmentCaptureMode
     private let onPhoto: (Data) -> Void
     private let onDocumentPDF: (Data) -> Void
     private let onError: (String) -> Void
 
-    private let captureSession = AVCaptureSession()
-    private let photoOutput = AVCapturePhotoOutput()
-    private let videoOutput = AVCaptureVideoDataOutput()
-    private let documentRectangleDetector = DocumentLiveRectangleDetector()
-    private let sessionQueue = DispatchQueue(label: "floweroll.attachment-camera.session")
+    private let cameraSession = TaskAttachmentCameraSessionOwner()
+    private lazy var documentRectangleDetector = DocumentLiveRectangleDetector { [weak self] corners in
+        Task { @MainActor [weak self] in
+            self?.handleLiveDocumentRectangle(corners)
+        }
+    }
     private var previewLayer: AVCaptureVideoPreviewLayer?
     private var scannedPages: [Data] = []
     private var photoSession: TaskAttachmentPhotoSession
     private var isCaptureInFlight = false
     private var hasEndedSession = false
-    private var requestedPhotoDimensions: CMVideoDimensions?
 
     private let shutterButton = UIButton(type: .custom)
     private let pageLabel = UILabel()
@@ -287,11 +424,6 @@ final class TaskAttachmentCaptureViewController: UIViewController, @preconcurren
         self.onError = onError
         super.init(nibName: nil, bundle: nil)
         modalPresentationStyle = .fullScreen
-        documentRectangleDetector.onRectangle = { [weak self] corners in
-            DispatchQueue.main.async {
-                self?.handleLiveDocumentRectangle(corners)
-            }
-        }
     }
 
     required init?(coder: NSCoder) { nil }
@@ -310,9 +442,7 @@ final class TaskAttachmentCaptureViewController: UIViewController, @preconcurren
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        sessionQueue.async { [captureSession] in
-            if captureSession.isRunning { captureSession.stopRunning() }
-        }
+        cameraSession.stop()
     }
 
     private func prepareCamera() {
@@ -321,9 +451,14 @@ final class TaskAttachmentCaptureViewController: UIViewController, @preconcurren
             configureCameraSession()
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-                guard let self else { return }
-                if granted { self.configureCameraSession() }
-                else { self.failAndDismiss("没有相机权限。可以到系统设置允许相机后再试。") }
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    if granted {
+                        self.configureCameraSession()
+                    } else {
+                        self.failAndDismiss("没有相机权限。可以到系统设置允许相机后再试。")
+                    }
+                }
             }
         default:
             failAndDismiss("没有相机权限。可以到系统设置允许相机后再试。")
@@ -331,78 +466,26 @@ final class TaskAttachmentCaptureViewController: UIViewController, @preconcurren
     }
 
     private func configureCameraSession() {
-        let captureMode = mode
-        sessionQueue.async { [weak self] in
-            guard let self else { return }
-            self.captureSession.beginConfiguration()
-            self.captureSession.sessionPreset = .photo
-            guard let camera = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
-                  let input = try? AVCaptureDeviceInput(device: camera),
-                  self.captureSession.canAddInput(input),
-                  self.captureSession.canAddOutput(self.photoOutput)
-            else {
-                self.captureSession.commitConfiguration()
+        cameraSession.configure(
+            mode: mode,
+            documentRectangleDetector: documentRectangleDetector
+        ) { [weak self] ready in
+            guard let self, !self.hasEndedSession else { return }
+            if ready {
+                self.installPreview()
+            } else {
                 self.failAndDismiss("暂时无法启动相机，请关闭其他正在使用相机的 App 后重试。")
-                return
             }
-            self.captureSession.addInput(input)
-            self.captureSession.addOutput(self.photoOutput)
-            if captureMode == .document, self.captureSession.canAddOutput(self.videoOutput) {
-                self.captureSession.addOutput(self.videoOutput)
-                self.documentRectangleDetector.attach(to: self.videoOutput)
-            }
-            if let dimensions = Self.preferredPhotoDimensions(
-                mode: captureMode,
-                supported: camera.activeFormat.supportedMaxPhotoDimensions
-            ) {
-                self.photoOutput.maxPhotoDimensions = dimensions
-                self.requestedPhotoDimensions = dimensions
-            }
-            // AVCaptureSession forbids startRunning while a configuration
-            // transaction is open. Commit first; physical iPhone enforces this
-            // with NSGenericException even though Simulator cannot exercise it.
-            self.captureSession.commitConfiguration()
-            DispatchQueue.main.async { [weak self] in self?.installPreview() }
-            self.captureSession.startRunning()
         }
     }
 
     private func installPreview() {
         guard previewLayer == nil else { return }
-        let layer = AVCaptureVideoPreviewLayer(session: captureSession)
+        let layer = AVCaptureVideoPreviewLayer(session: cameraSession.session)
         layer.videoGravity = .resizeAspectFill
         layer.frame = view.bounds
         view.layer.insertSublayer(layer, at: 0)
         previewLayer = layer
-    }
-
-    nonisolated private static func preferredPhotoDimensions(
-        mode: TaskAttachmentCaptureMode,
-        supported: [CMVideoDimensions]
-    ) -> CMVideoDimensions? {
-        guard !supported.isEmpty else { return nil }
-        if mode == .document {
-            return supported.max { lhs, rhs in
-                Int64(lhs.width) * Int64(lhs.height) < Int64(rhs.width) * Int64(rhs.height)
-            }
-        }
-
-        // Ordinary camera sessions retain several compressed captures in memory
-        // until the user taps Done. Keep the per-shot request around 12 MP when
-        // the active format offers it, while preserving a deterministic fallback
-        // to the smallest supported dimensions on unusual hardware.
-        let ordinaryPixelBudget: Int64 = 13_000_000
-        let bounded = supported.filter {
-            Int64($0.width) * Int64($0.height) <= ordinaryPixelBudget
-        }
-        if bounded.isEmpty {
-            return supported.min { lhs, rhs in
-                Int64(lhs.width) * Int64(lhs.height) < Int64(rhs.width) * Int64(rhs.height)
-            }
-        }
-        return bounded.max { lhs, rhs in
-            Int64(lhs.width) * Int64(lhs.height) < Int64(rhs.width) * Int64(rhs.height)
-        }
     }
 
     private func configureOverlay() {
@@ -654,17 +737,9 @@ final class TaskAttachmentCaptureViewController: UIViewController, @preconcurren
         }
         isCaptureInFlight = true
         updateCaptureControls()
-        let settings = AVCapturePhotoSettings()
-        // AVCapturePhotoOutput defaults to a maximum prioritization of
-        // .balanced. Requesting .quality without opting the output into that
-        // level throws NSInvalidArgumentException on physical iPhone. Balanced
-        // keeps manual capture responsive and deterministic for both ordinary
-        // photos and document pages.
-        settings.photoQualityPrioritization = .balanced
-        if let requestedPhotoDimensions {
-            settings.maxPhotoDimensions = requestedPhotoDimensions
+        cameraSession.capturePhoto(delegate: self) { [weak self] in
+            self?.captureFailed("相机尚未准备好，请再试一次。")
         }
-        photoOutput.capturePhoto(with: settings, delegate: self)
     }
 
     @objc private func deleteTapped() {

@@ -124,6 +124,48 @@ extension RuntimeInteractionPolicyTests {
         )
     }
 
+    func testPendingClarificationCapturesLongSameSubjectWorkflowCorrection() {
+        let pending = FlowerollPendingInteractionRoutingContext(
+            kind: .clarification,
+            id: "clar-reminder-delete",
+            prompt: "是否删除这条提醒？",
+            options: [
+                .init(id: "confirm_delete", label: "确认删除这条提醒"),
+                .init(id: "keep", label: "暂时保留，不删除"),
+            ],
+            acceptsText: true,
+            actionAttemptID: nil,
+            bindingDigest: nil
+        )
+        let context = routingContext(pending: pending)
+        let correction = "先查询确认这条提醒确实存在，再继续按原计划；真正删除时再向我确认。"
+
+        XCTAssertEqual(
+            FlowerollGlobalInputRoutingPolicy.route(text: correction, context: context),
+            .answerPendingInteraction(
+                taskID: "task-a",
+                interaction: pending,
+                response: .text(correction)
+            )
+        )
+        XCTAssertEqual(
+            FlowerollGlobalInputRoutingPolicy.route(
+                text: "新任务，帮我查询提醒事项",
+                context: context
+            ),
+            .newTask,
+            "an explicit independent-task marker must still win"
+        )
+        XCTAssertEqual(
+            FlowerollGlobalInputRoutingPolicy.route(
+                text: "帮我查明天杭州天气",
+                context: context
+            ),
+            .newTask,
+            "same pending clarification must not capture an unrelated goal"
+        )
+    }
+
     func testPendingInteractionDoesNotCaptureUnrelatedIndependentGoal() {
         let pending = FlowerollPendingInteractionRoutingContext(
             kind: .clarification,

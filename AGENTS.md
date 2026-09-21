@@ -76,7 +76,7 @@ HTTP/schema、OCR/PDF/Office、图片/媒体处理、上传下载、重试、Pro
 - FastAPI/Pydantic 已经解决真实 HTTP 维护成本，保留；
 - 当前 MCP 自研层规模仍可控，暂不强迁官方 SDK；
 - DeepEval 暂不接入；
-- 不整体迁 TCA、Temporal 或 LangGraph；
+- Planner 已使用 LangGraph；不把整个 durable Task Runtime 再整体迁入 TCA、Temporal 或 LangGraph；
 - 图片能力是真实产品能力，换底层实现不能删除 semantic contract。
 
 ## 能力规则

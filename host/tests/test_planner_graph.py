@@ -148,18 +148,19 @@ class PlannerGraphTests(unittest.TestCase):
         self.assertNotIn("capability_catalog", recovered.runtime_context)
         self.assertEqual(
             recovered.runtime_context["relevant_memories"],
-            value.runtime_context["relevant_memories"],
+            normal.runtime_context["relevant_memories"],
         )
+        self.assertLessEqual(len(recovered.runtime_context["relevant_memories"]), 3)
         docx = next(row for row in recovered.verified_observations if row["capability"] == "document.docx.inspect")
         self.assertEqual(docx["data"]["file_id"], "file-exact")
         self.assertEqual(docx["data"]["readback"]["text_sha256"], "a" * 64)
         self.assertEqual(docx["data"]["readback"]["warnings"], ["表格版式未重建"])
         self.assertLessEqual(len(docx["data"]["readback"]["text"]), 900)
-        search = next(row for row in recovered.verified_observations if row["capability"] == "capability.search")
-        self.assertEqual(search["data"]["selected_capability_ids"], ["travel.hotel.search", "work.execute"])
-        self.assertEqual(search["data"]["query"], "上海黄浦区 酒店 房间 查询")
-        self.assertNotIn("notice", search["data"])
-        self.assertNotIn("offset", search["data"])
+        self.assertFalse(any(row["capability"] == "capability.search" for row in recovered.verified_observations))
+        discovery = recovered.runtime_context["capability_discovery_evidence"]
+        self.assertEqual(discovery["attempt_count"], 1)
+        self.assertEqual(discovery["recent_searches"][0]["query"], "上海黄浦区 酒店 房间 查询")
+        self.assertEqual(discovery["recent_searches"][0]["domain"], "travel")
         self.assertLess(
             recovery_metrics["context_chars_after_compaction"],
             normal_metrics["context_chars_after_compaction"] * 0.7,

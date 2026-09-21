@@ -164,6 +164,8 @@ class PolicyDirective:
     operations: frozenset[str]
     domains: frozenset[str]
     source_text: str
+    families: frozenset[str] = frozenset()
+    except_titles: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -274,25 +276,81 @@ def _is_allow_clause(clause: str) -> bool:
     return any(marker in lowered for marker in ALLOW_MARKERS)
 
 
-def directives_from_text(text: str) -> List[PolicyDirective]:
+# Domains are discovery buckets, not entity authorization scopes. In
+# particular, denying a calendar write must not deny an explicitly requested
+# reminder write. Unknown/custom device families remain conservative.
+NATIVE_FAMILY_TERMS = {
+    "calendar": ("calendar", "日历", "日程"),
+    "reminder": ("reminder", "提醒"),
+    "alarm": ("alarm", "闹钟"),
+    "contacts": ("contact", "联系人", "通讯录"),
+    "notify": ("notify", "notification", "通知"),
+    "location": ("location", "定位", "当前位置"),
+}
+
+
+def _families_in_text(text: str) -> frozenset[str]:
+    lowered = text.lower()
+    return frozenset(family for family, terms in NATIVE_FAMILY_TERMS.items()
+                     if any(term in lowered for term in terms))
+
+
+def _declared_create_titles(text: str) -> Dict[str, set[str]]:
+    # Only a literal name in an affirmative user create clause is an authority
+    # source. Pronouns in an exception cannot invent a new authorized object.
+    result: Dict[str, set[str]] = {}
+    for clause in re.split(r"[。；;\n]", text):
+        if not any(word in clause for word in ("创建", "新建", "添加", "create ")):
+            continue
+        if any(marker in clause.lower() for marker in NEGATION_MARKERS):
+            continue
+        families = _families_in_text(clause)
+        if len(families) != 1:
+            continue
+        names = re.findall(r'(?:标题(?:叫|为|是)?|名为|名叫|叫)\s*[：:]?\s*[“「\"]([^”」\"]{1,300})[”」\"]', clause)
+        if names:
+            result.setdefault(next(iter(families)), set()).update(names)
+    return result
+
+
+def directives_from_text(
+    text: str, *, declared_titles: Optional[Dict[str, set[str]]] = None
+) -> List[PolicyDirective]:
     directives: List[PolicyDirective] = []
+    targets = declared_titles if declared_titles is not None else _declared_create_titles(text)
     for raw_clause in _DIRECTIVE_SEPARATOR_RE.split(text):
         clause = raw_clause.strip()
         if not clause:
             continue
         lowered = clause.lower()
         domains = _domains_in_text(clause)
+        families = _families_in_text(clause)
         operations = operation_signals(clause)
+        # "不要创建日历、闹钟或通知" also denies notification delivery,
+        # whose semantic operation is send, not create.
+        if "notify" in families:
+            operations.add("send")
         if any(marker in lowered for marker in READ_ONLY_MARKERS):
-            directives.append(PolicyDirective("DENY", WRITE_OPERATIONS, domains, clause))
+            directives.append(PolicyDirective("DENY", WRITE_OPERATIONS, domains, clause, families))
             continue
         if not operations:
             continue
         if _is_allow_clause(clause):
-            directives.append(PolicyDirective("ALLOW", frozenset(operations), domains, clause))
+            directives.append(PolicyDirective("ALLOW", frozenset(operations), domains, clause, families))
             continue
         if any(marker in lowered for marker in NEGATION_MARKERS):
-            directives.append(PolicyDirective("DENY", frozenset(operations), domains, clause))
+            except_titles: frozenset[str] = frozenset()
+            if ("create" in operations and len(families) == 1
+                    and "除" in clause and ("以外" in clause or "之外" in clause)):
+                family = next(iter(families))
+                known = targets.get(family, set())
+                literal = re.search(r'除\s*[“「\"]([^”」\"]+)[”」\"]', clause)
+                if literal and literal.group(1) in known:
+                    except_titles = frozenset({literal.group(1)})
+                elif not literal and ("这条" in clause or "这一条" in clause) and len(known) == 1:
+                    except_titles = frozenset(known)
+            directives.append(PolicyDirective(
+                "DENY", frozenset(operations), domains, clause, families, except_titles))
     return directives
 
 
@@ -318,17 +376,27 @@ class EffectiveTaskCapabilityPolicy:
     @classmethod
     def from_texts(cls, texts: Sequence[str]) -> "EffectiveTaskCapabilityPolicy":
         directives: List[PolicyDirective] = []
+        declared: Dict[str, set[str]] = {}
         for text in texts:
             if isinstance(text, str) and text.strip():
-                directives.extend(directives_from_text(text))
+                for family, titles in _declared_create_titles(text).items():
+                    declared.setdefault(family, set()).update(titles)
+                directives.extend(directives_from_text(text, declared_titles=declared))
         return cls(directives)
 
     @classmethod
     def from_task(cls, task: Dict[str, Any], events: Sequence[Dict[str, Any]]) -> "EffectiveTaskCapabilityPolicy":
         return cls.from_texts([str(task.get("goal") or ""), *user_turn_texts(events)])
 
-    def decide(self, spec: CapabilitySpec, registry: Optional[CapabilityRegistry] = None) -> CapabilityPolicyDecision:
+    def decide(
+        self, spec: CapabilitySpec, registry: Optional[CapabilityRegistry] = None,
+        *, arguments: Optional[Dict[str, Any]] = None,
+        prior_created_titles: Sequence[str] = (),
+    ) -> CapabilityPolicyDecision:
         semantics = capability_semantics(spec, registry)
+        family = spec.name.split(".", 1)[0]
+        if family not in NATIVE_FAMILY_TERMS:
+            family = ""
         if semantics.operation_is_generic and semantics.effect != "read":
             target_operations: Sequence[str] = sorted(WRITE_OPERATIONS)
         else:
@@ -338,9 +406,21 @@ class EffectiveTaskCapabilityPolicy:
         for directive in self.directives:
             if directive.domains and not (directive.domains & semantics.domains):
                 continue
+            if directive.families and family and family not in directive.families:
+                continue
             for operation in target_operations:
                 if operation in directive.operations:
-                    states[operation] = (directive.mode, directive)
+                    mode = directive.mode
+                    if operation == "create" and directive.except_titles and family in directive.families:
+                        # Discovery may expose a constrained capability. Execution
+                        # must provide the exact user-authorized name and cannot
+                        # create a second object under a new Action identity.
+                        if arguments is None:
+                            mode = "ALLOW"
+                        elif (arguments.get("title") in directive.except_titles
+                              and arguments.get("title") not in prior_created_titles):
+                            mode = "ALLOW"
+                    states[operation] = (mode, directive)
         denied = [(operation, value[1]) for operation, value in states.items() if value[0] == "DENY"]
         if denied:
             operation, directive = denied[-1]
@@ -358,6 +438,13 @@ class EffectiveTaskCapabilityPolicy:
             operation=semantics.operation,
             domains=tuple(sorted(semantics.domains)),
         )
+
+    def model_view(self) -> List[Dict[str, Any]]:
+        return [{"mode": item.mode, "operations": sorted(item.operations),
+                 "domains": sorted(item.domains), "families": sorted(item.families),
+                 **({"except_exact_titles": sorted(item.except_titles), "max_creations_per_title": 1}
+                    if item.except_titles else {})}
+                for item in self.directives]
 
     def allows(self, spec: CapabilitySpec, registry: Optional[CapabilityRegistry] = None) -> bool:
         return self.decide(spec, registry).allowed

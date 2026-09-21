@@ -101,6 +101,38 @@ class DiscoveryConvergenceTests(unittest.TestCase):
         self.action('work.execute', {'units':units})
         self.assertEqual(self.store.capability_discovery_state(self.tid)['total_searches'], 5)
 
+    def test_latest_standalone_discovery_head_outranks_older_appended_work_unit_receipts(self):
+        # Reproduce the production ordering bug: old nested receipts are
+        # appended after newer main observations when Planner context is built.
+        # Fill the discovery budget with several older subgoals first.
+        units = [
+            self.unit('old-hotel', '酒店住宿', 'travel'),
+            self.unit('old-alarm', 'alarm.create', 'device'),
+            self.unit('old-calendar', 'calendar.create', 'device'),
+            self.unit('old-weather', '天气查询', 'location'),
+            self.unit('old-doc', '生成 DOCX 文档', 'document'),
+        ]
+        result = self.action('work.execute', {'units': units})
+        self.assertEqual(result['status'], 'succeeded', result)
+
+        # The newest direct search asks for reminder.query. At this point the
+        # no-progress budget is exhausted, so the selector cannot rely on one
+        # more capability.search turn to repair a bad working set.
+        result = self.action(SEARCH_ID, {
+            'query': '查询提醒事项 列出提醒 reminder query',
+            'domain': 'device',
+            'limit': 6,
+        })
+        self.assertEqual(result['status'], 'succeeded', result)
+        state = self.store.capability_discovery_state(self.tid)
+        self.assertFalse(state['search_allowed'])
+        self.assertEqual(state['pages'][-1]['ids'][0], 'reminder.query')
+
+        visible = [spec.name for spec in self.selected().capabilities]
+        self.assertIn('reminder.query', visible)
+        self.assertEqual(visible[0], 'reminder.query')
+        self.assertNotIn(SEARCH_ID, visible)
+
     def test_two_duplicate_pages_close_both_direct_and_nested_discovery(self):
         for _ in range(3):
             self.action(SEARCH_ID, {'query':'alarm.create', 'domain':'device', 'limit':1})

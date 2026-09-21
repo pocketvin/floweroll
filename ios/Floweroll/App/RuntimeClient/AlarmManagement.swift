@@ -181,6 +181,23 @@ enum AlarmSettingsMutationReconciler {
         native: AlarmNativeRecord?,
         ownershipStore: AlarmOwnershipStore
     ) async throws -> AlarmSettingsMutationReconciliationResult {
+        if intent.operation == .update, intent.replacementPhase != nil {
+            guard let title = intent.requestedTitle, let schedule = intent.requestedSchedule,
+                  let sound = intent.requestedSound,
+                  let owner = await ownershipStore.record(alarmID: intent.alarmID)
+            else { return .ambiguous("replacement_intent_invalid") }
+            let request = AlarmNativeScheduleRequest(id: intent.alarmID, title: title, taskID: owner.taskID,
+                actionID: intent.mutationID, idempotencyKey: intent.mutationID, schedule: schedule, sound: sound)
+            switch try await AlarmConfigurationReplacement.reconcile(
+                request: request, nativeSnapshot: native,
+                ownershipStore: ownershipStore, stopRequested: false
+            ) {
+            case .settled(.updated): return .completed
+            case let .settled(.failed(reason, _)): return .ambiguous(reason)
+            case .resume: return .ambiguous("replacement_pending_recovery")
+            case let .unknown(reason): return .ambiguous(reason)
+            }
+        }
         switch intent.operation {
         case .update:
             guard let requestedTitle = intent.requestedTitle,
@@ -447,205 +464,142 @@ actor AlarmQueryExecutor: DeviceCapabilityExecutor {
 
 actor AlarmUpdateExecutor: DeviceCapabilityExecutor {
     nonisolated let capabilityID = "alarm.update"
-
     private let nativeStore: any AlarmNativeStore
     private let ownershipStore: AlarmOwnershipStore?
 
-    init(
-        nativeStore: any AlarmNativeStore = SystemAlarmNativeStore(),
-        ownershipStore: AlarmOwnershipStore? = AlarmOwnershipStore.shared
-    ) {
+    init(nativeStore: any AlarmNativeStore = SystemAlarmNativeStore(),
+         ownershipStore: AlarmOwnershipStore? = AlarmOwnershipStore.shared) {
         self.nativeStore = nativeStore
         self.ownershipStore = ownershipStore
     }
 
+    private func nativeRequest(_ dispatch: DeviceActionDispatch, _ args: AlarmUpdateArguments) -> AlarmNativeScheduleRequest {
+        AlarmNativeScheduleRequest(id: args.alarmID, title: args.title, taskID: dispatch.taskID,
+                                   actionID: dispatch.actionID, idempotencyKey: dispatch.idempotencyKey,
+                                   schedule: args.schedule, sound: args.sound)
+    }
+
     func preflight(_ dispatch: DeviceActionDispatch) async throws -> DeviceExecutionResult? {
-        guard let arguments = AlarmUpdateArguments.parse(dispatch.payload) else {
-            return alarmFailure(.invalidArguments)
-        }
+        guard let args = AlarmUpdateArguments.parse(dispatch.payload) else { return alarmFailure(.invalidArguments) }
         guard let ownershipStore else { return alarmFailure(.ownershipStoreUnavailable) }
-        if let permission = alarmPermissionFailure(await nativeStore.authorizationStatus()) {
-            return permission
+        if let permission = alarmPermissionFailure(await nativeStore.authorizationStatus()) { return permission }
+        guard let owner = await ownershipStore.record(alarmID: args.alarmID), owner.lifecycle != .cancelled else {
+            return await unmanagedTargetFailure(alarmID: args.alarmID, nativeStore: nativeStore, ownershipStore: ownershipStore)
         }
-        guard let target = try await managedAlarmTarget(
-            alarmID: arguments.alarmID,
-            nativeStore: nativeStore,
-            ownershipStore: ownershipStore
-        ) else {
-            return await unmanagedTargetFailure(
-                alarmID: arguments.alarmID,
-                nativeStore: nativeStore,
-                ownershipStore: ownershipStore
-            )
+        if let pending = owner.pendingSettingsMutation {
+            guard pending.mutationID == dispatch.actionID, pending.operation == .update,
+                  pending.replacementPhase != nil,
+                  pending.requestedTitle == args.title, pending.requestedSound == args.sound,
+                  pending.requestedSchedule?.isSemanticallyEquivalent(to: args.schedule) == true
+            else { return alarmFailure(.settingsMutationPending) }
+            return nil
         }
-        guard target.ownership.pendingSettingsMutation == nil else {
-            return alarmFailure(
-                .settingsMutationPending,
-                extra: ["alarm_id": .string(arguments.alarmID.uuidString)]
-            )
+        guard let native = try await nativeStore.alarms().first(where: { $0.id == args.alarmID }) else {
+            return alarmFailure(.readbackMissing)
         }
-        guard let native = target.native else {
-            return alarmFailure(.readbackMissing, extra: ["alarm_id": .string(arguments.alarmID.uuidString)])
-        }
-        guard native.state == .scheduled else {
-            return alarmFailure(
-                .invalidNativeState,
-                extra: [
-                    "alarm_id": .string(arguments.alarmID.uuidString),
-                    "native_state": .string(native.state.rawValue),
-                    "required_state": .string(AlarmNativeState.scheduled.rawValue),
-                ]
-            )
-        }
+        guard native.state == .scheduled else { return alarmFailure(.invalidNativeState) }
         return nil
     }
 
     func execute(_ dispatch: DeviceActionDispatch) async throws -> DeviceExecutionResult {
-        guard let arguments = AlarmUpdateArguments.parse(dispatch.payload) else {
-            return alarmFailure(.invalidArguments)
-        }
+        guard let args = AlarmUpdateArguments.parse(dispatch.payload) else { return alarmFailure(.invalidArguments) }
         guard let ownershipStore else { return alarmFailure(.ownershipStoreUnavailable) }
-        guard let before = try await managedAlarmTarget(
-            alarmID: arguments.alarmID,
-            nativeStore: nativeStore,
-            ownershipStore: ownershipStore
-        ) else {
-            return await unmanagedTargetFailure(
-                alarmID: arguments.alarmID,
-                nativeStore: nativeStore,
-                ownershipStore: ownershipStore
-            )
+        if let failure = try await preflight(dispatch) { return failure }
+        if let owner = await ownershipStore.record(alarmID: args.alarmID),
+           owner.pendingSettingsMutation == nil,
+           owner.lastMutationActionID == dispatch.actionID,
+           owner.title == args.title, owner.effectiveSound == args.sound,
+           owner.schedule.isSemanticallyEquivalent(to: args.schedule),
+           let native = try await nativeStore.alarms().first(where: { $0.id == args.alarmID }),
+           args.schedule.matches(native.schedule) {
+            return Self.successResult(dispatch: dispatch, arguments: args, native: native,
+                                      duplicateSuppressed: true, reconciled: false)
         }
-        guard before.ownership.pendingSettingsMutation == nil else {
-            return alarmFailure(
-                .settingsMutationPending,
-                extra: ["alarm_id": .string(arguments.alarmID.uuidString)]
-            )
-        }
-        guard let beforeNative = before.native else {
-            return alarmFailure(.readbackMissing, extra: ["alarm_id": .string(arguments.alarmID.uuidString)])
-        }
-        guard beforeNative.state == .scheduled else {
-            return alarmFailure(.invalidNativeState, extra: ["native_state": .string(beforeNative.state.rawValue)])
-        }
-
-        if before.ownership.lastMutationActionID == dispatch.actionID,
-           before.ownership.title == arguments.title,
-           before.ownership.schedule.isSemanticallyEquivalent(to: arguments.schedule),
-           before.ownership.effectiveSound == arguments.sound,
-           arguments.schedule.matches(beforeNative.schedule)
-        {
-            return Self.successResult(
-                dispatch: dispatch,
-                arguments: arguments,
-                native: beforeNative,
-                duplicateSuppressed: true,
-                reconciled: false
-            )
-        }
-
-        do {
-            _ = try await nativeStore.schedule(
-                AlarmNativeScheduleRequest(
-                    id: arguments.alarmID,
-                    title: arguments.title,
-                    taskID: dispatch.taskID,
-                    actionID: dispatch.actionID,
-                    idempotencyKey: dispatch.idempotencyKey,
-                    schedule: arguments.schedule,
-                    sound: arguments.sound
-                )
-            )
-        } catch {
-            throw AlarmNativeStoreError.nativeFailure(AlarmFailureCode.updateFailed.rawValue)
-        }
-        guard let saved = try await nativeStore.alarms().first(where: { $0.id == arguments.alarmID }) else {
-            throw AlarmNativeStoreError.nativeFailure(AlarmFailureCode.readbackMissing.rawValue)
-        }
-        guard arguments.schedule.matches(saved.schedule) else {
-            return alarmFailure(.readbackMismatch, extra: ["alarm_id": .string(arguments.alarmID.uuidString)])
-        }
-        _ = try await ownershipStore.recordUpdated(
-            alarmID: arguments.alarmID,
-            taskID: dispatch.taskID,
-            actionID: dispatch.actionID,
-            title: arguments.title,
-            schedule: arguments.schedule,
-            sound: arguments.sound,
-            nativeState: saved.state
+        let result = try await AlarmConfigurationReplacement.execute(
+            request: nativeRequest(dispatch, args), nativeStore: nativeStore, ownershipStore: ownershipStore
         )
-        return Self.successResult(
-            dispatch: dispatch,
-            arguments: arguments,
-            native: saved,
-            duplicateSuppressed: false,
-            reconciled: false
-        )
+        return resultForReplacement(result, dispatch: dispatch, arguments: args, reconciled: false)
     }
 
-    func reconcile(
-        _ dispatch: DeviceActionDispatch,
-        journalEntry: DeviceActionJournalEntry
-    ) async throws -> DeviceReconciliationResult {
-        guard let arguments = AlarmUpdateArguments.parse(dispatch.payload) else {
-            return .completed(alarmFailure(.invalidArguments))
-        }
-        guard let ownershipStore else {
-            return .stillUnknown(AlarmFailureCode.ownershipStoreUnavailable.rawValue)
-        }
-        guard await nativeStore.authorizationStatus() == .authorized else {
-            return .stillUnknown(AlarmFailureCode.authorizationUnknown.rawValue)
-        }
-        guard let target = try await managedAlarmTarget(
-            alarmID: arguments.alarmID,
-            nativeStore: nativeStore,
-            ownershipStore: ownershipStore
-        ), let native = target.native else {
+    func reconcile(_ dispatch: DeviceActionDispatch, journalEntry: DeviceActionJournalEntry) async throws -> DeviceReconciliationResult {
+        guard let args = AlarmUpdateArguments.parse(dispatch.payload) else { return .completed(alarmFailure(.invalidArguments)) }
+        guard let ownershipStore else { return .stillUnknown(AlarmFailureCode.ownershipStoreUnavailable.rawValue) }
+        guard await nativeStore.authorizationStatus() == .authorized else { return .stillUnknown(AlarmFailureCode.authorizationUnknown.rawValue) }
+        guard let owner = await ownershipStore.record(alarmID: args.alarmID) else {
             return .stillUnknown(AlarmFailureCode.readbackMissing.rawValue)
         }
-        guard target.ownership.pendingSettingsMutation == nil else {
-            return .stillUnknown(AlarmFailureCode.settingsMutationPending.rawValue)
+        let native = try await nativeStore.alarms().first { $0.id == args.alarmID }
+
+        // A trusted exact-ID cancellation receipt plus native absence means the
+        // old update is superseded, not that it "never started". Deliver a
+        // settled failure; Host's pending cancellation can then finish safely.
+        if owner.lifecycle == .cancelled, native == nil,
+           let cancelledAt = owner.cancelledAt, cancelledAt >= journalEntry.createdAt,
+           let cancellationID = owner.cancelledByActionID,
+           !cancellationID.isEmpty, owner.lastMutationActionID == cancellationID {
+            return .completed(.failure("目标闹钟已被取消，先前修改已停止。", output: [
+                "error_code": .string("alarm_update_superseded_by_cancel"),
+                "alarm_id": .string(args.alarmID.uuidString),
+                "native_absence_verified": .bool(true), "cancellation_receipt": .string(cancellationID)
+            ]))
         }
-
-        let decision = alarmUpdateReconciliationDecision(
-            AlarmUpdateReconciliationEvidence(
-                requestedScheduleMatchesNative: arguments.schedule.matches(native.schedule),
-                previousScheduleMatchesNative: target.ownership.schedule.matches(native.schedule),
-                titleMatchesOwnership: target.ownership.title == arguments.title,
-                requestedScheduleMatchesOwnership: target.ownership.schedule.isSemanticallyEquivalent(
-                    to: arguments.schedule
-                ),
-                soundMatchesOwnership: target.ownership.effectiveSound == arguments.sound
+        guard owner.lifecycle != .cancelled else { return .stillUnknown("alarm_cancel_receipt_or_native_state_unresolved") }
+        if let pending = owner.pendingSettingsMutation {
+            guard pending.mutationID == dispatch.actionID, pending.replacementPhase != nil else {
+                return .stillUnknown(AlarmFailureCode.settingsMutationPending.rawValue)
+            }
+            let recovery = try await AlarmConfigurationReplacement.reconcile(
+                request: nativeRequest(dispatch, args), nativeStore: nativeStore,
+                ownershipStore: ownershipStore, stopRequested: dispatch.reconciliationOnly == true
             )
-        )
-
+            switch recovery {
+            case let .settled(result):
+                return .completed(resultForReplacement(result, dispatch: dispatch, arguments: args, reconciled: true))
+            case .resume:
+                return .resumeAuthorizedOperation
+            case let .unknown(reason):
+                return .stillUnknown(reason)
+            }
+        }
+        if let outcome = owner.lastSettingsMutationOutcome,
+           outcome.mutationID == dispatch.actionID, outcome.resolution == .failed {
+            return .completed(.failure(outcome.detail ?? "闹钟修改未完成。", output: [
+                "error_code": .string(AlarmFailureCode.updateFailed.rawValue),
+                "original_restored": .bool(native != nil), "alarm_id": .string(args.alarmID.uuidString)
+            ]))
+        }
+        guard let native else { return .stillUnknown(AlarmFailureCode.readbackMissing.rawValue) }
+        // Installed legacy attempts have no replacement journal. Preserve the
+        // conservative old readback behavior, but their next execution uses the
+        // new transaction instead of repeated schedule(existing ID).
+        let decision = alarmUpdateReconciliationDecision(AlarmUpdateReconciliationEvidence(
+            requestedScheduleMatchesNative: args.schedule.matches(native.schedule),
+            previousScheduleMatchesNative: owner.schedule.matches(native.schedule),
+            titleMatchesOwnership: owner.title == args.title,
+            requestedScheduleMatchesOwnership: owner.schedule.isSemanticallyEquivalent(to: args.schedule),
+            soundMatchesOwnership: owner.effectiveSound == args.sound
+        ))
         switch decision {
         case .completed:
-            _ = try await ownershipStore.recordUpdated(
-                alarmID: arguments.alarmID,
-                taskID: dispatch.taskID,
-                actionID: dispatch.actionID,
-                title: arguments.title,
-                schedule: arguments.schedule,
-                sound: arguments.sound,
-                nativeState: native.state,
-                now: journalEntry.updatedAt
-            )
-            return .completed(
-                Self.successResult(
-                    dispatch: dispatch,
-                    arguments: arguments,
-                    native: native,
-                    duplicateSuppressed: true,
-                    reconciled: true
-                )
-            )
+            _ = try await ownershipStore.recordUpdated(alarmID: args.alarmID, taskID: dispatch.taskID,
+                actionID: dispatch.actionID, title: args.title, schedule: args.schedule, sound: args.sound,
+                nativeState: native.state, now: journalEntry.updatedAt)
+            return .completed(Self.successResult(dispatch: dispatch, arguments: args, native: native,
+                                                duplicateSuppressed: true, reconciled: true))
+        case .definitelyNotStarted: return .definitelyNotStarted
+        case let .stillUnknown(reason): return .stillUnknown(reason)
+        }
+    }
 
-        case .definitelyNotStarted:
-            return .definitelyNotStarted
-
-        case let .stillUnknown(reason):
-            return .stillUnknown(reason)
+    private func resultForReplacement(_ result: AlarmReplacementResult, dispatch: DeviceActionDispatch,
+                                      arguments: AlarmUpdateArguments, reconciled: Bool) -> DeviceExecutionResult {
+        switch result {
+        case let .updated(native):
+            return Self.successResult(dispatch: dispatch, arguments: arguments, native: native,
+                                      duplicateSuppressed: reconciled, reconciled: reconciled)
+        case let .failed(reason, originalRestored):
+            return .failure(reason, output: ["error_code": .string(AlarmFailureCode.updateFailed.rawValue),
+                "original_restored": .bool(originalRestored), "alarm_id": .string(arguments.alarmID.uuidString)])
         }
     }
 
@@ -955,6 +909,9 @@ struct FlowerollAlarmRecord: Identifiable, Equatable, Sendable {
     }
 
     var stateLabel: String {
+        if lastMutationOutcome?.resolution == .failed {
+            return nativePresent ? "修改未完成，原闹钟已保留" : "修改未完成，闹钟已移除"
+        }
         guard nativePresent, let state else { return "已从系统移除" }
         switch state {
         case .scheduled: return "已计划"
@@ -1034,25 +991,18 @@ final class AlarmManagementModel {
                     requestedSound: sound
                 )
                 durableIntentPersisted = true
-                _ = try await nativeStore.schedule(
-                    AlarmNativeScheduleRequest(
-                        id: alarm.id,
-                        title: title,
-                        taskID: ownership.taskID,
-                        actionID: durableMutationID,
-                        idempotencyKey: durableMutationID,
-                        schedule: schedule,
-                        sound: sound
-                    )
+                let result = try await AlarmConfigurationReplacement.execute(
+                    request: AlarmNativeScheduleRequest(
+                        id: alarm.id, title: title, taskID: ownership.taskID,
+                        actionID: durableMutationID, idempotencyKey: durableMutationID,
+                        schedule: schedule, sound: sound
+                    ), nativeStore: nativeStore, ownershipStore: ownershipStore
                 )
-                guard let readback = try await nativeStore.alarms().first(where: { $0.id == alarm.id }),
-                      schedule.matches(readback.schedule)
-                else { throw AlarmNativeStoreError.nativeFailure(AlarmFailureCode.readbackMismatch.rawValue) }
-                _ = try await ownershipStore.completeSettingsUpdate(
-                    alarmID: alarm.id,
-                    mutationID: durableMutationID,
-                    nativeState: readback.state
-                )
+                if case let .failed(reason, _) = result {
+                    await load()
+                    errorMessage = reason
+                    return
+                }
                 await load()
             } catch {
                 let resolution = durableIntentPersisted
@@ -1263,5 +1213,273 @@ final class AlarmManagementModel {
             alarms = []
             errorMessage = "读取小卷闹钟失败：\(error.localizedDescription)"
         }
+    }
+}
+
+
+// MARK: - Durable AlarmKit configuration replacement
+
+private actor AlarmReplacementExecutionGate {
+    static let shared = AlarmReplacementExecutionGate()
+    private var active = Set<UUID>()
+    func acquire(_ id: UUID) -> Bool { active.insert(id).inserted }
+    func release(_ id: UUID) { active.remove(id) }
+    func contains(_ id: UUID) -> Bool { active.contains(id) }
+}
+
+enum AlarmReplacementResult: Equatable, Sendable {
+    case updated(AlarmNativeRecord)
+    case failed(reason: String, originalRestored: Bool)
+}
+
+enum AlarmReplacementRecovery: Equatable, Sendable {
+    case settled(AlarmReplacementResult)
+    case resume
+    case unknown(String)
+}
+
+/// AlarmKit exposes cancel and schedule, not an atomic configuration update.
+/// Keep the product/native ID, but only schedule after exact-ID absence has
+/// been read back. The durable intent fences settings vs Task execution and
+/// retains the original configuration for rollback across process loss.
+enum AlarmConfigurationReplacement {
+    static func execute(
+        request: AlarmNativeScheduleRequest,
+        nativeStore: any AlarmNativeStore,
+        ownershipStore: AlarmOwnershipStore
+    ) async throws -> AlarmReplacementResult {
+        guard await AlarmReplacementExecutionGate.shared.acquire(request.id) else {
+            throw AlarmNativeStoreError.nativeFailure("alarm_replacement_already_executing")
+        }
+        do {
+            let result = try await executeOwned(request: request, nativeStore: nativeStore, ownershipStore: ownershipStore)
+            await AlarmReplacementExecutionGate.shared.release(request.id)
+            return result
+        } catch {
+            await AlarmReplacementExecutionGate.shared.release(request.id)
+            throw error
+        }
+    }
+
+    private static func executeOwned(
+        request: AlarmNativeScheduleRequest,
+        nativeStore: any AlarmNativeStore,
+        ownershipStore: AlarmOwnershipStore
+    ) async throws -> AlarmReplacementResult {
+        guard await nativeStore.authorizationStatus() == .authorized else {
+            throw AlarmNativeStoreError.nativeFailure(AlarmFailureCode.authorizationDenied.rawValue)
+        }
+        guard let owner = await ownershipStore.record(alarmID: request.id), owner.lifecycle != .cancelled else {
+            return .failed(reason: "目标闹钟已经取消，不会重新创建。", originalRestored: false)
+        }
+        if let pending = owner.pendingSettingsMutation {
+            guard matches(pending, request) else { throw AlarmOwnershipStoreError.settingsMutationAlreadyPending }
+        } else {
+            guard let before = try await nativeStore.alarms().first(where: { $0.id == request.id }),
+                  before.state == .scheduled, owner.schedule.matches(before.schedule)
+            else { throw AlarmNativeStoreError.nativeFailure(AlarmFailureCode.readbackMismatch.rawValue) }
+            _ = try await ownershipStore.beginSettingsMutation(
+                alarmID: request.id, mutationID: request.actionID, operation: .update,
+                beforeNativeState: before.state, requestedTitle: request.title,
+                requestedSchedule: request.schedule, requestedSound: request.sound
+            )
+        }
+        if await ownershipStore.record(alarmID: request.id)?.pendingSettingsMutation?.replacementPhase == nil {
+            _ = try await ownershipStore.advanceReplacement(
+                alarmID: request.id, mutationID: request.actionID, phase: .removingOriginal
+            )
+        }
+
+        // Each transition is durable before its next native side effect. A
+        // single invocation normally traverses removal, replacement, readback.
+        for _ in 0..<5 {
+            try Task.checkCancellation()
+            guard let current = await ownershipStore.record(alarmID: request.id),
+                  current.lifecycle != .cancelled,
+                  let intent = current.pendingSettingsMutation, matches(intent, request),
+                  let phase = intent.replacementPhase
+            else { throw AlarmOwnershipStoreError.settingsMutationIdentityConflict }
+            let native = try await nativeStore.alarms().first { $0.id == request.id }
+            switch phase {
+            case .removingOriginal:
+                if let native {
+                    guard intent.beforeSchedule.matches(native.schedule), native.state == .scheduled else {
+                        throw AlarmNativeStoreError.nativeFailure("alarm_replacement_original_changed")
+                    }
+                    do { try await nativeStore.cancel(id: request.id) }
+                    catch {
+                        let after = try await nativeStore.alarms().first { $0.id == request.id }
+                        if let after, intent.beforeSchedule.matches(after.schedule) {
+                            return try await fail(request, native: after, reason: "无法取消旧配置，原闹钟已保留。", store: ownershipStore)
+                        }
+                        if after != nil { throw error }
+                        // A lost cancellation ACK is recoverable via exact absence.
+                    }
+                }
+                guard !(try await nativeStore.alarms().contains { $0.id == request.id }) else {
+                    throw AlarmNativeStoreError.nativeFailure(AlarmFailureCode.stillPresentAfterCancel.rawValue)
+                }
+                _ = try await ownershipStore.advanceReplacement(
+                    alarmID: request.id, mutationID: request.actionID, phase: .schedulingReplacement
+                )
+
+            case .schedulingReplacement:
+                if let native {
+                    guard request.schedule.matches(native.schedule) else {
+                        throw AlarmNativeStoreError.nativeFailure("alarm_replacement_target_changed")
+                    }
+                    return try await complete(request, native: native, store: ownershipStore)
+                }
+                if (intent.replacementAttempts ?? 0) >= 3 {
+                    _ = try await ownershipStore.advanceReplacement(
+                        alarmID: request.id, mutationID: request.actionID, phase: .restoringOriginal
+                    )
+                    continue
+                }
+                _ = try await ownershipStore.advanceReplacement(
+                    alarmID: request.id, mutationID: request.actionID, phase: .schedulingReplacement, countAttempt: true
+                )
+                do { _ = try await nativeStore.schedule(request) }
+                catch {
+                    let after = try await nativeStore.alarms().first { $0.id == request.id }
+                    if let after, request.schedule.matches(after.schedule) {
+                        return try await complete(request, native: after, store: ownershipStore)
+                    }
+                    if after != nil { throw error }
+                    // A definitive empty readback allows rollback, not a second
+                    // create against an uncertain/existing native object.
+                    _ = try await ownershipStore.advanceReplacement(
+                        alarmID: request.id, mutationID: request.actionID, phase: .restoringOriginal
+                    )
+                    continue
+                }
+                guard let saved = try await nativeStore.alarms().first(where: { $0.id == request.id }),
+                      request.schedule.matches(saved.schedule)
+                else {
+                    _ = try await ownershipStore.advanceReplacement(
+                        alarmID: request.id, mutationID: request.actionID, phase: .restoringOriginal
+                    )
+                    continue
+                }
+                return try await complete(request, native: saved, store: ownershipStore)
+
+            case .restoringOriginal:
+                if let native {
+                    guard intent.beforeSchedule.matches(native.schedule) else {
+                        throw AlarmNativeStoreError.nativeFailure("alarm_rollback_native_state_ambiguous")
+                    }
+                    return try await fail(request, native: native, reason: "新配置未写入，已恢复原闹钟。", store: ownershipStore)
+                }
+                if (intent.replacementAttempts ?? 0) >= 3 {
+                    return try await fail(request, native: nil,
+                        reason: "闹钟修改失败且原配置未能恢复；该闹钟当前不存在，请重新设置。", store: ownershipStore)
+                }
+                _ = try await ownershipStore.advanceReplacement(
+                    alarmID: request.id, mutationID: request.actionID, phase: .restoringOriginal, countAttempt: true
+                )
+                let original = AlarmNativeScheduleRequest(
+                    id: request.id, title: intent.beforeTitle, taskID: request.taskID,
+                    actionID: request.actionID, idempotencyKey: request.idempotencyKey,
+                    schedule: intent.beforeSchedule, sound: intent.beforeSound
+                )
+                do { _ = try await nativeStore.schedule(original) }
+                catch {
+                    if let restored = try await nativeStore.alarms().first(where: { $0.id == request.id }),
+                       intent.beforeSchedule.matches(restored.schedule) {
+                        return try await fail(request, native: restored, reason: "新配置未写入，已恢复原闹钟。", store: ownershipStore)
+                    }
+                    throw error // durable rollback phase is retried within its bound.
+                }
+                guard let restored = try await nativeStore.alarms().first(where: { $0.id == request.id }),
+                      intent.beforeSchedule.matches(restored.schedule)
+                else { throw AlarmNativeStoreError.nativeFailure("alarm_rollback_readback_missing") }
+                return try await fail(request, native: restored, reason: "新配置未写入，已恢复原闹钟。", store: ownershipStore)
+            }
+        }
+        throw AlarmNativeStoreError.nativeFailure("alarm_replacement_transition_bound")
+    }
+
+    static func reconcile(
+        request: AlarmNativeScheduleRequest, nativeStore: any AlarmNativeStore,
+        ownershipStore: AlarmOwnershipStore, stopRequested: Bool
+    ) async throws -> AlarmReplacementRecovery {
+        let snapshot = try await nativeStore.alarms().first { $0.id == request.id }
+        return try await reconcile(request: request,
+            nativeSnapshot: snapshot,
+            ownershipStore: ownershipStore, stopRequested: stopRequested)
+    }
+
+    static func reconcile(
+        request: AlarmNativeScheduleRequest, nativeSnapshot: AlarmNativeRecord?,
+        ownershipStore: AlarmOwnershipStore, stopRequested: Bool
+    ) async throws -> AlarmReplacementRecovery {
+        guard !(await AlarmReplacementExecutionGate.shared.contains(request.id)) else {
+            return .unknown("alarm_replacement_currently_executing")
+        }
+        guard let owner = await ownershipStore.record(alarmID: request.id),
+              let intent = owner.pendingSettingsMutation, matches(intent, request),
+              let phase = intent.replacementPhase
+        else { return .unknown("alarm_replacement_intent_missing") }
+        let native = nativeSnapshot
+        if phase == .schedulingReplacement, let native, request.schedule.matches(native.schedule) {
+            return .settled(try await complete(request, native: native, store: ownershipStore))
+        }
+        if phase == .restoringOriginal, let native, intent.beforeSchedule.matches(native.schedule) {
+            return .settled(try await fail(request, native: native, reason: "新配置未写入，已恢复原闹钟。", store: ownershipStore))
+        }
+        if stopRequested {
+            if native == nil {
+                return .settled(try await fail(request, native: nil,
+                    reason: "已停止修改；原闹钟已在更改过程中移除，不会自动重建。", store: ownershipStore))
+            }
+            if phase == .removingOriginal, let native, intent.beforeSchedule.matches(native.schedule) {
+                return .settled(try await fail(request, native: native, reason: "已停止修改，原闹钟保持不变。", store: ownershipStore))
+            }
+            return .unknown("alarm_stop_replacement_native_state_ambiguous")
+        }
+        if native == nil || (phase == .removingOriginal && intent.beforeSchedule.matches(native?.schedule)) {
+            return .resume
+        }
+        return .unknown("alarm_replacement_native_state_ambiguous")
+    }
+
+    static func recoverManualUpdates(
+        nativeStore: any AlarmNativeStore = SystemAlarmNativeStore(),
+        ownershipStore: AlarmOwnershipStore? = AlarmOwnershipStore.shared
+    ) async {
+        guard let ownershipStore, await nativeStore.authorizationStatus() == .authorized else { return }
+        for intent in await ownershipStore.pendingSettingsMutations()
+        where intent.replacementPhase != nil && intent.mutationID.hasPrefix("settings.manual.update.") {
+            guard !Task.isCancelled,
+                  let owner = await ownershipStore.record(alarmID: intent.alarmID),
+                  let title = intent.requestedTitle, let schedule = intent.requestedSchedule,
+                  let sound = intent.requestedSound else { continue }
+            let request = AlarmNativeScheduleRequest(
+                id: intent.alarmID, title: title, taskID: owner.taskID,
+                actionID: intent.mutationID, idempotencyKey: intent.mutationID,
+                schedule: schedule, sound: sound
+            )
+            _ = try? await execute(request: request, nativeStore: nativeStore, ownershipStore: ownershipStore)
+        }
+    }
+
+    private static func matches(_ intent: AlarmSettingsMutationIntent, _ request: AlarmNativeScheduleRequest) -> Bool {
+        intent.mutationID == request.actionID && intent.operation == .update && intent.alarmID == request.id
+            && intent.requestedTitle == request.title && intent.requestedSound == request.sound
+            && intent.requestedSchedule?.isSemanticallyEquivalent(to: request.schedule) == true
+    }
+
+    private static func complete(_ request: AlarmNativeScheduleRequest, native: AlarmNativeRecord,
+                                 store: AlarmOwnershipStore) async throws -> AlarmReplacementResult {
+        _ = try await store.completeSettingsUpdate(alarmID: request.id, mutationID: request.actionID, nativeState: native.state)
+        return .updated(native)
+    }
+
+    private static func fail(_ request: AlarmNativeScheduleRequest, native: AlarmNativeRecord?, reason: String,
+                             store: AlarmOwnershipStore) async throws -> AlarmReplacementResult {
+        _ = try await store.finishReplacementFailure(
+            alarmID: request.id, mutationID: request.actionID, nativeState: native?.state, detail: reason
+        )
+        return .failed(reason: reason, originalRestored: native != nil)
     }
 }

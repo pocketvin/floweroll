@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import XCTest
 @testable import Floweroll
@@ -252,6 +253,165 @@ final class SystemEntryOwnershipTests: XCTestCase {
     }
 
     @MainActor
+    func testExistingSystemOwnerAttachmentTurnIsAdmittedBeforeHomeSendReturns() async throws {
+        let suite = "SystemEntryOwnershipTests.existing-owner-attachment-turn.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        defaults.set("http://localhost", forKey: RuntimeTaskStore.endpointDefaultsKey)
+
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("floweroll-existing-owner-attachment-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pendingStore = try PendingSubmissionStore(directoryURL: directory)
+
+        let bytes = Data("existing-owner-attachment-turn".utf8)
+        let attachmentID = "existingowner" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        let storedName = attachmentID + ".txt"
+        let sha256 = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+        let attachment = PendingAttachment(
+            id: attachmentID,
+            name: "补充材料.txt",
+            mediaType: "text/plain",
+            sizeBytes: bytes.count,
+            sha256: sha256,
+            storedName: storedName
+        )
+        let durableURL = try attachment.fileURL()
+        let cacheURL = try attachment.acceptedCacheURL()
+        try bytes.write(to: durableURL, options: .atomic)
+        defer {
+            try? FileManager.default.removeItem(at: durableURL)
+            try? FileManager.default.removeItem(at: cacheURL)
+        }
+
+        let receipt = TaskMaterialFile(
+            id: attachment.id,
+            name: attachment.name,
+            mediaType: attachment.mediaType,
+            sizeBytes: attachment.sizeBytes,
+            sha256: attachment.sha256,
+            category: "input",
+            metadata: [:]
+        )
+        let recorder = SystemEntryRequestRecorder()
+        SystemEntryURLProtocol.install { request in
+            recorder.append(request)
+            if request.httpMethod == "GET",
+               request.url?.path == "/v1/files/\(attachment.id)" {
+                return (200, try JSONEncoder.floweroll.encode(receipt))
+            }
+            if request.httpMethod == "POST",
+               request.url?.path == "/v1/tasks/task-active/turns" {
+                return (202, Data("{}".utf8))
+            }
+            return (404, Data())
+        }
+
+        let coordinator = SystemEntryRuntimeCoordinator(
+            defaults: defaults,
+            pendingStore: pendingStore,
+            deviceWorker: nil,
+            session: Self.session()
+        )
+        let prepared = SystemEntryPreparedHomeInput(
+            normalizedText: "补充这份材料",
+            target: .currentTask(
+                taskID: "task-active",
+                threadID: "thread-active",
+                operation: .userTurn(text: "补充这份材料")
+            )
+        )
+        let route = try await coordinator.enqueuePreparedHomeInputWithoutNewExecutionWindow(
+            prepared,
+            submissionID: "event-existing-owner-attachment",
+            attachments: [attachment]
+        )
+
+        XCTAssertEqual(route.taskID, "task-active")
+        XCTAssertEqual(route.kind, .userTurn)
+        XCTAssertFalse(route.ownsExecutionWindow)
+        let pendingAfterReturn = await pendingStore.pendingUserTurns()
+        XCTAssertTrue(
+            pendingAfterReturn.isEmpty,
+            "Home Send must not return while the exact durable turn is still waiting for a later recovery window"
+        )
+
+        let turnRequest = try XCTUnwrap(recorder.snapshot().first(where: {
+            $0.request.httpMethod == "POST" && $0.request.url?.path == "/v1/tasks/task-active/turns"
+        }))
+        let body = try XCTUnwrap(turnRequest.body)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["event_id"] as? String, "event-existing-owner-attachment")
+        let content = try XCTUnwrap(json["content"] as? [String: Any])
+        XCTAssertEqual(content["text"] as? String, "补充这份材料")
+        XCTAssertEqual(content["attachment_ids"] as? [String], [attachment.id])
+    }
+
+    @MainActor
+    func testExistingSystemOwnerAttachmentFailureKeepsExactPendingTurnForRecovery() async throws {
+        let suite = "SystemEntryOwnershipTests.existing-owner-attachment-failure.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        defaults.set("http://localhost", forKey: RuntimeTaskStore.endpointDefaultsKey)
+
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("floweroll-existing-owner-attachment-failure-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pendingStore = try PendingSubmissionStore(directoryURL: directory)
+
+        let bytes = Data("existing-owner-recovery".utf8)
+        let attachmentID = "existingfailure" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        let attachment = PendingAttachment(
+            id: attachmentID,
+            name: "待恢复材料.txt",
+            mediaType: "text/plain",
+            sizeBytes: bytes.count,
+            sha256: SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined(),
+            storedName: attachmentID + ".txt"
+        )
+        let durableURL = try attachment.fileURL()
+        try bytes.write(to: durableURL, options: .atomic)
+        defer { try? FileManager.default.removeItem(at: durableURL) }
+
+        SystemEntryURLProtocol.install { _ in
+            throw URLError(.notConnectedToInternet)
+        }
+        let coordinator = SystemEntryRuntimeCoordinator(
+            defaults: defaults,
+            pendingStore: pendingStore,
+            deviceWorker: nil,
+            session: Self.session()
+        )
+        let prepared = SystemEntryPreparedHomeInput(
+            normalizedText: "网络断了也保留这条补充",
+            target: .currentTask(
+                taskID: "task-active-failure",
+                threadID: "thread-active-failure",
+                operation: .userTurn(text: "网络断了也保留这条补充")
+            )
+        )
+
+        do {
+            _ = try await coordinator.enqueuePreparedHomeInputWithoutNewExecutionWindow(
+                prepared,
+                submissionID: "event-existing-owner-failure",
+                attachments: [attachment]
+            )
+            XCTFail("network failure must surface to the current send")
+        } catch {
+            XCTAssertFalse(error is CancellationError)
+        }
+
+        let pending = await pendingStore.pendingUserTurns()
+        XCTAssertEqual(pending.count, 1)
+        XCTAssertEqual(pending.first?.eventID, "event-existing-owner-failure")
+        XCTAssertEqual(pending.first?.taskID, "task-active-failure")
+        XCTAssertEqual(pending.first?.attachments, [attachment])
+    }
+
+    @MainActor
     func testThreadFollowUpKeepsSubmissionAndParentIdentity() async throws {
         let suite = "SystemEntryOwnershipTests.thread-follow-up.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -336,6 +496,16 @@ final class SystemEntryOwnershipTests: XCTestCase {
         XCTAssertTrue(info.contains("com.maxenceyu.floweroll.runtime.recovery"))
     }
 
+    func testOrphanedContinuedTaskTrackingIsRemovedWithoutTouchingTrackedTasks() {
+        XCTAssertEqual(
+            ContinuedTaskTrackingReconciliationPolicy.orphanedContinuedTaskIDs(
+                trackedTaskIDs: ["active", "tracked-only"],
+                continuedTaskIDs: ["active", "stale-terminal"]
+            ),
+            ["stale-terminal"]
+        )
+    }
+
     func testPersistFirstInAppSendRequestsBGCPTBeforeSlowWork() throws {
         let appRoot = try ProductSourceFiles.iosRoot().appendingPathComponent("Floweroll/App")
         let store = try String(
@@ -390,56 +560,69 @@ final class SystemEntryOwnershipTests: XCTestCase {
 
     func testTaskScopedReservationOnlyHoldsStaleNeedsUserTruth() {
         XCTAssertTrue(ContinuedTaskStableStatePolicy.shouldHoldForTaskScopedMutation(
-            status: "waiting",
-            hasPendingInteraction: true,
+            state: RuntimeTaskStateDimensions(
+                status: "waiting",
+                hasRawPendingInteraction: true
+            ),
             hasTaskScopedMutationReservation: true
         ))
         XCTAssertTrue(ContinuedTaskStableStatePolicy.shouldHoldForTaskScopedMutation(
-            status: "needs_user",
-            hasPendingInteraction: false,
+            state: RuntimeTaskStateDimensions(status: "needs_user"),
             hasTaskScopedMutationReservation: true
         ))
         XCTAssertFalse(ContinuedTaskStableStatePolicy.shouldHoldForTaskScopedMutation(
-            status: "waiting",
-            hasPendingInteraction: true,
+            state: RuntimeTaskStateDimensions(
+                status: "waiting",
+                hasRawPendingInteraction: true
+            ),
             hasTaskScopedMutationReservation: false
         ))
         XCTAssertFalse(ContinuedTaskStableStatePolicy.shouldHoldForTaskScopedMutation(
-            status: "completed",
-            hasPendingInteraction: true,
+            state: RuntimeTaskStateDimensions(
+                status: "completed",
+                hasRawPendingInteraction: true
+            ),
             hasTaskScopedMutationReservation: true
         ))
         XCTAssertFalse(ContinuedTaskStableStatePolicy.shouldHoldForTaskScopedMutation(
-            status: "active",
-            hasPendingInteraction: false,
+            state: RuntimeTaskStateDimensions(status: "active"),
             hasTaskScopedMutationReservation: true
         ))
     }
 
     func testActiveTaskKeepsExecutionOwnerWhileAnotherClarificationRemainsPending() {
-        XCTAssertFalse(ContinuedTaskStableStatePolicy.shouldReleaseForPendingInteraction(
-            status: "active",
-            hasPendingInteraction: true
+        XCTAssertFalse(ContinuedTaskStableStatePolicy.shouldReleaseExecutionOwner(
+            state: RuntimeTaskStateDimensions(
+                status: "active",
+                hasRawPendingInteraction: true
+            )
         ))
-        XCTAssertTrue(ContinuedTaskStableStatePolicy.shouldReleaseForPendingInteraction(
-            status: "waiting",
-            hasPendingInteraction: true
+        XCTAssertTrue(ContinuedTaskStableStatePolicy.shouldReleaseExecutionOwner(
+            state: RuntimeTaskStateDimensions(
+                status: "waiting",
+                hasRawPendingInteraction: true
+            )
         ))
-        XCTAssertTrue(ContinuedTaskStableStatePolicy.shouldReleaseForPendingInteraction(
-            status: "needs_user",
-            hasPendingInteraction: true
+        XCTAssertTrue(ContinuedTaskStableStatePolicy.shouldReleaseExecutionOwner(
+            state: RuntimeTaskStateDimensions(status: "needs_user")
         ))
-        XCTAssertTrue(ContinuedTaskStableStatePolicy.shouldReleaseForPendingInteraction(
-            status: "blocked",
-            hasPendingInteraction: true
+        XCTAssertTrue(ContinuedTaskStableStatePolicy.shouldReleaseExecutionOwner(
+            state: RuntimeTaskStateDimensions(
+                status: "blocked",
+                hasRawPendingInteraction: true
+            )
         ))
-        XCTAssertFalse(ContinuedTaskStableStatePolicy.shouldReleaseForPendingInteraction(
-            status: "active",
-            hasPendingInteraction: false
+        XCTAssertTrue(ContinuedTaskStableStatePolicy.shouldReleaseExecutionOwner(
+            state: RuntimeTaskStateDimensions(status: "blocked")
         ))
-        XCTAssertFalse(ContinuedTaskStableStatePolicy.shouldReleaseForPendingInteraction(
-            status: "completed",
-            hasPendingInteraction: true
+        XCTAssertFalse(ContinuedTaskStableStatePolicy.shouldReleaseExecutionOwner(
+            state: RuntimeTaskStateDimensions(status: "active")
+        ))
+        XCTAssertFalse(ContinuedTaskStableStatePolicy.shouldReleaseExecutionOwner(
+            state: RuntimeTaskStateDimensions(
+                status: "completed",
+                hasRawPendingInteraction: true
+            )
         ))
     }
 
@@ -450,14 +633,14 @@ final class SystemEntryOwnershipTests: XCTestCase {
         let scope = try XCTUnwrap(source.range(of: "struct TaskScopedHouIntent: AppIntent"))
         let tail = String(source[scope.lowerBound...])
         let reserve = try XCTUnwrap(tail.range(of: "beginTaskScopedMutationReservation("))
-        let submit = try XCTUnwrap(tail.range(of: "submitUserInitiatedContinuation("))
-        let mutate = try XCTUnwrap(tail.range(of: "performTaskScopedOperation("))
-        let firstRelease = try XCTUnwrap(tail.range(of: "endTaskScopedMutationReservation("))
+        let bgcptBranch = String(tail[reserve.lowerBound...])
+        let submit = try XCTUnwrap(bgcptBranch.range(of: "submitUserInitiatedContinuation("))
+        let mutate = try XCTUnwrap(bgcptBranch.range(of: "performTaskScopedOperation("))
+        let firstRelease = try XCTUnwrap(bgcptBranch.range(of: "endTaskScopedMutationReservation("))
 
-        XCTAssertLessThan(reserve.lowerBound, submit.lowerBound)
         XCTAssertLessThan(submit.lowerBound, mutate.lowerBound)
         XCTAssertLessThan(mutate.lowerBound, firstRelease.lowerBound)
-        XCTAssertEqual(tail.components(separatedBy: "endTaskScopedMutationReservation(").count - 1, 2)
+        XCTAssertEqual(bgcptBranch.components(separatedBy: "endTaskScopedMutationReservation(").count - 1, 2)
     }
 
     func testCustomActivityStartReusesOnlyMatchingTaskActivities() {
@@ -672,6 +855,69 @@ final class SystemEntryOwnershipTests: XCTestCase {
         XCTAssertTrue(source.contains("client.cancelTask("))
     }
 
+    func testInAppInputsJoinExistingSystemLongRunningOwnerBeforeStartingBGCPT() throws {
+        let appRoot = try ProductSourceFiles.iosRoot().appendingPathComponent("Floweroll/App")
+        let intents = try String(
+            contentsOf: appRoot.appendingPathComponent("FlowerollIntents.swift"),
+            encoding: .utf8
+        )
+        let coordinator = try String(
+            contentsOf: appRoot.appendingPathComponent("RuntimeClient/SystemEntryRuntimeCoordinator.swift"),
+            encoding: .utf8
+        )
+
+        let homeStart = try XCTUnwrap(intents.range(of: "struct HomeHouTaskIntent: AppIntent"))
+        let taskScopedStart = try XCTUnwrap(
+            intents.range(of: "struct TaskScopedHouIntent: AppIntent", range: homeStart.upperBound..<intents.endIndex)
+        )
+        let followUpStart = try XCTUnwrap(
+            intents.range(of: "struct ThreadFollowUpHouIntent: AppIntent", range: taskScopedStart.upperBound..<intents.endIndex)
+        )
+        let homeScope = String(intents[homeStart.lowerBound..<taskScopedStart.lowerBound])
+        let taskScopedScope = String(intents[taskScopedStart.lowerBound..<followUpStart.lowerBound])
+
+        let homeJoin = try XCTUnwrap(homeScope.range(of: "hasActiveSystemExecution(taskID: taskID)"))
+        let homeBGCPT = try XCTUnwrap(homeScope.range(of: "beginUserInitiatedOutboxContinuation("))
+        XCTAssertLessThan(homeJoin.lowerBound, homeBGCPT.lowerBound)
+        XCTAssertTrue(homeScope.contains("enqueuePreparedHomeInputWithoutNewExecutionWindow("))
+        XCTAssertTrue(homeScope.contains("bgcpt-reacquired"))
+
+        let scopedJoin = try XCTUnwrap(
+            taskScopedScope.range(of: "hasActiveSystemExecution(taskID: normalizedTaskID)")
+        )
+        let scopedBGCPT = try XCTUnwrap(
+            taskScopedScope.range(of: "beginTaskScopedMutationReservation(")
+        )
+        XCTAssertLessThan(scopedJoin.lowerBound, scopedBGCPT.lowerBound)
+        XCTAssertTrue(taskScopedScope.contains("bgcpt-reacquired"))
+        XCTAssertTrue(coordinator.contains("func hasActiveSystemExecution(taskID: String) -> Bool"))
+    }
+
+    func testSystemEntryTasksKeepRecoveryEligibilityWithoutJoiningBGCPT() throws {
+        let sourceURL = try ProductSourceFiles.iosRoot()
+            .appendingPathComponent("Floweroll/App/RuntimeClient/SystemEntryRuntimeCoordinator.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        let newStart = try XCTUnwrap(source.range(of: "private func submitNewSystemEntry("))
+        let currentStart = try XCTUnwrap(
+            source.range(of: "private func currentSystemEntryRoute(", range: newStart.upperBound..<source.endIndex)
+        )
+        let performStart = try XCTUnwrap(
+            source.range(of: "private func performCurrentOperation(", range: currentStart.upperBound..<source.endIndex)
+        )
+        let newScope = String(source[newStart.lowerBound..<currentStart.lowerBound])
+        let currentScope = String(source[currentStart.lowerBound..<performStart.lowerBound])
+
+        XCTAssertTrue(newScope.contains("trackDurableTask(taskID, reason: \"system_entry_task_admitted\")"))
+        XCTAssertTrue(newScope.contains("activeExecutionTaskIDs.insert(taskID)"))
+        XCTAssertFalse(newScope.contains("submitUserInitiatedContinuation("))
+
+        XCTAssertTrue(currentScope.contains("reason: \"system_entry_current_task_handoff\""))
+        XCTAssertTrue(currentScope.contains("handoffInAppTaskToSystemLongRunning("))
+        XCTAssertTrue(currentScope.contains("activeExecutionTaskIDs.insert(current.taskID).inserted"))
+        XCTAssertFalse(currentScope.contains("submitUserInitiatedContinuation("))
+    }
+
     func testSecondSystemEntryInvocationReusesExistingExecutionReservation() throws {
         let sourceURL = try ProductSourceFiles.iosRoot()
             .appendingPathComponent("Floweroll/App/RuntimeClient/SystemEntryRuntimeCoordinator.swift")
@@ -722,6 +968,32 @@ final class SystemEntryOwnershipTests: XCTestCase {
         XCTAssertEqual(update.subtitle, "正在查看日程")
         XCTAssertEqual(update.completedUnitCount, SystemEntryProgressPresentationPolicy.activeFloorUnitCount)
         XCTAssertEqual(update.totalUnitCount, SystemEntryProgressPresentationPolicy.totalUnitCount)
+    }
+
+    @MainActor
+    func testLongRunningBlockedTaskIsPausedNotFailed() async throws {
+        let suite = "SystemEntryOwnershipTests.blocked.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        defaults.set("http://localhost", forKey: RuntimeTaskStore.endpointDefaultsKey)
+
+        SystemEntryURLProtocol.install { _ in
+            (200, try JSONEncoder.floweroll.encode(
+                Self.view(status: "blocked", result: .object(["summary": .string("模型暂时不可用")]))
+            ))
+        }
+        let coordinator = SystemEntryRuntimeCoordinator(
+            defaults: defaults,
+            pendingStore: nil,
+            deviceWorker: nil,
+            session: Self.session()
+        )
+        let outcome = try await coordinator.runSubmittedTask(
+            taskID: "task-blocked",
+            executionWindowSeconds: nil
+        )
+        XCTAssertEqual(outcome.state, .blocked)
+        XCTAssertEqual(outcome.message, "模型暂时不可用")
     }
 
     @MainActor

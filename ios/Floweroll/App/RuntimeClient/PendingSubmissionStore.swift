@@ -148,13 +148,23 @@ actor PendingSubmissionStore {
             createdAt: createdAt,
             attachments: attachments.isEmpty ? nil : attachments
         )
-        submissions[submissionID] = submission
-        try persist()
+        var nextSubmissions = submissions
+        nextSubmissions[submissionID] = submission
+        try persist(submissions: nextSubmissions, userTurns: userTurns)
+        submissions = nextSubmissions
         return submission
     }
 
     func pending() -> [PendingSubmission] {
         Self.sortedSubmissions(submissions.values)
+    }
+
+    func attachmentIDsInUse() -> Set<String> {
+        var ids = Set(submissions.values.flatMap { ($0.attachments ?? []).map(\.id) })
+        ids.formUnion(
+            userTurns.values.flatMap { ($0.attachments ?? []).map(\.id) }
+        )
+        return ids
     }
 
     func submission(id: String) -> PendingSubmission? {
@@ -166,21 +176,28 @@ actor PendingSubmissionStore {
         submission.attemptCount += 1
         submission.lastAttemptAt = at
         submission.lastErrorMessage = nil
-        submissions[submissionID] = submission
-        try persist()
+        var nextSubmissions = submissions
+        nextSubmissions[submissionID] = submission
+        try persist(submissions: nextSubmissions, userTurns: userTurns)
+        submissions = nextSubmissions
     }
 
     func markFailed(submissionID: String, message: String, at: Date = Date()) throws {
         guard var submission = submissions[submissionID] else { return }
         submission.lastAttemptAt = at
         submission.lastErrorMessage = message
-        submissions[submissionID] = submission
-        try persist()
+        var nextSubmissions = submissions
+        nextSubmissions[submissionID] = submission
+        try persist(submissions: nextSubmissions, userTurns: userTurns)
+        submissions = nextSubmissions
     }
 
     func markAccepted(submissionID: String) throws {
-        guard submissions.removeValue(forKey: submissionID) != nil else { return }
-        try persist()
+        guard submissions[submissionID] != nil else { return }
+        var nextSubmissions = submissions
+        nextSubmissions.removeValue(forKey: submissionID)
+        try persist(submissions: nextSubmissions, userTurns: userTurns)
+        submissions = nextSubmissions
         acknowledgedSubmissionIDs.append(submissionID)
         if acknowledgedSubmissionIDs.count > 256 { acknowledgedSubmissionIDs.removeFirst() }
     }
@@ -191,9 +208,15 @@ actor PendingSubmissionStore {
 
     @discardableResult
     func discard(submissionID: String) throws -> PendingSubmission? {
+        guard let removed = submissions[submissionID] else {
+            acknowledgedSubmissionIDs.removeAll { $0 == submissionID }
+            return nil
+        }
+        var nextSubmissions = submissions
+        nextSubmissions.removeValue(forKey: submissionID)
+        try persist(submissions: nextSubmissions, userTurns: userTurns)
+        submissions = nextSubmissions
         acknowledgedSubmissionIDs.removeAll { $0 == submissionID }
-        let removed = submissions.removeValue(forKey: submissionID)
-        if removed != nil { try persist() }
         return removed
     }
 
@@ -224,8 +247,10 @@ actor PendingSubmissionStore {
             createdAt: createdAt,
             attachments: attachments.isEmpty ? nil : attachments
         )
-        userTurns[eventID] = turn
-        try persist()
+        var nextUserTurns = userTurns
+        nextUserTurns[eventID] = turn
+        try persist(submissions: submissions, userTurns: nextUserTurns)
+        userTurns = nextUserTurns
         return turn
     }
 
@@ -242,21 +267,28 @@ actor PendingSubmissionStore {
         turn.attemptCount += 1
         turn.lastAttemptAt = at
         turn.lastErrorMessage = nil
-        userTurns[eventID] = turn
-        try persist()
+        var nextUserTurns = userTurns
+        nextUserTurns[eventID] = turn
+        try persist(submissions: submissions, userTurns: nextUserTurns)
+        userTurns = nextUserTurns
     }
 
     func markUserTurnFailed(eventID: String, message: String, at: Date = Date()) throws {
         guard var turn = userTurns[eventID] else { return }
         turn.lastAttemptAt = at
         turn.lastErrorMessage = message
-        userTurns[eventID] = turn
-        try persist()
+        var nextUserTurns = userTurns
+        nextUserTurns[eventID] = turn
+        try persist(submissions: submissions, userTurns: nextUserTurns)
+        userTurns = nextUserTurns
     }
 
     func markUserTurnAccepted(eventID: String) throws {
-        guard userTurns.removeValue(forKey: eventID) != nil else { return }
-        try persist()
+        guard userTurns[eventID] != nil else { return }
+        var nextUserTurns = userTurns
+        nextUserTurns.removeValue(forKey: eventID)
+        try persist(submissions: submissions, userTurns: nextUserTurns)
+        userTurns = nextUserTurns
         acknowledgedUserTurnIDs.append(eventID)
         if acknowledgedUserTurnIDs.count > 256 { acknowledgedUserTurnIDs.removeFirst() }
     }
@@ -267,13 +299,22 @@ actor PendingSubmissionStore {
 
     @discardableResult
     func discardUserTurn(eventID: String) throws -> PendingUserTurn? {
+        guard let removed = userTurns[eventID] else {
+            acknowledgedUserTurnIDs.removeAll { $0 == eventID }
+            return nil
+        }
+        var nextUserTurns = userTurns
+        nextUserTurns.removeValue(forKey: eventID)
+        try persist(submissions: submissions, userTurns: nextUserTurns)
+        userTurns = nextUserTurns
         acknowledgedUserTurnIDs.removeAll { $0 == eventID }
-        let removed = userTurns.removeValue(forKey: eventID)
-        if removed != nil { try persist() }
         return removed
     }
 
-    private func persist() throws {
+    private func persist(
+        submissions: [String: PendingSubmission],
+        userTurns: [String: PendingUserTurn]
+    ) throws {
         let snapshot = Snapshot(
             submissions: Self.sortedSubmissions(submissions.values),
             userTurns: Self.sortedUserTurns(userTurns.values)

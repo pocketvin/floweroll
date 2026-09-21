@@ -371,10 +371,19 @@ final class TaskMaterialsTests: XCTestCase {
     func testNativeListScrollerMovesToHistoryAndBackToActive() async throws {
         let scroller = TaskListNativeScroller()
         let host = UIHostingController(rootView: TaskListNativeScrollerProbe(scroller: scroller))
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 720))
+        let scene = try XCTUnwrap(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        )
+        let previousKeyWindow = scene.windows.first(where: \.isKeyWindow)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 720)
         window.rootViewController = host
         window.makeKeyAndVisible()
-        defer { window.isHidden = true }
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            previousKeyWindow?.makeKey()
+        }
 
         host.view.frame = window.bounds
         host.view.setNeedsLayout()

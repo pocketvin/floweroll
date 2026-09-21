@@ -68,6 +68,10 @@ INSPECT_SCHEMA: Dict[str, Any] = {
     "type": "object",
     "properties": {
         "file_id": {"type": "string", "minLength": 1, "maxLength": 100},
+        "text_offset": {
+            "type": "integer", "minimum": 0, "maximum": 64 * 1024 * 1024,
+            "description": "从上次 readback.next_text_offset 或 planner_next_read 继续读取；同一文件同一窗口不会产生新信息。",
+        },
         "max_chars": {
             "type": "integer",
             "minimum": 256,
@@ -188,7 +192,7 @@ def _normalize_output_name(value: Any) -> str:
 def validate_inspect_arguments(value: Any) -> Dict[str, Any]:
     obj = _exact_object(
         value,
-        allowed={"file_id", "max_chars"},
+        allowed={"file_id", "max_chars", "text_offset"},
         required={"file_id"},
         field="document.docx.inspect arguments",
     )
@@ -199,7 +203,8 @@ def validate_inspect_arguments(value: Any) -> Dict[str, Any]:
         raise DocxSemanticError("INVALID_PAYLOAD", "file_id is not a valid TaskAsset identifier") from exc
     max_chars = obj.get("max_chars", DEFAULT_INSPECT_CHARS)
     max_chars = _bounded_int(max_chars, field="max_chars", minimum=256, maximum=MAX_INSPECT_CHARS)
-    return {"file_id": file_id, "max_chars": max_chars}
+    text_offset = _bounded_int(obj.get("text_offset", 0), field="text_offset", minimum=0, maximum=64 * 1024 * 1024)
+    return {"file_id": file_id, "max_chars": max_chars, "text_offset": text_offset}
 
 
 def validate_generate_arguments(value: Any) -> Dict[str, Any]:
@@ -497,8 +502,11 @@ def _core_properties(archive: zipfile.ZipFile) -> Dict[str, str]:
     return result
 
 
-def inspect_docx_bytes(data: bytes, *, max_chars: int = DEFAULT_INSPECT_CHARS) -> Dict[str, Any]:
+def inspect_docx_bytes(
+    data: bytes, *, max_chars: int = DEFAULT_INSPECT_CHARS, text_offset: int = 0
+) -> Dict[str, Any]:
     max_chars = _bounded_int(max_chars, field="max_chars", minimum=256, maximum=MAX_INSPECT_CHARS)
+    text_offset = _bounded_int(text_offset, field="text_offset", minimum=0, maximum=64 * 1024 * 1024)
     if not data or len(data) > MAX_SEMANTIC_INPUT_BYTES:
         raise DocxSemanticError("INPUT_TOO_LARGE", "DOCX exceeds semantic inspection byte bound")
     try:
@@ -625,9 +633,14 @@ def inspect_docx_bytes(data: bytes, *, max_chars: int = DEFAULT_INSPECT_CHARS) -
             warnings.append("direct_italic_run_count 只表示 OOXML 直接格式标记存在，不承诺混合 CJK 的视觉斜体保真。")
 
         full_text = "\n".join(paragraphs)
+        if text_offset > len(full_text):
+            raise DocxSemanticError("INVALID_PAYLOAD", "text_offset is beyond the document text")
+        selected_text = full_text[text_offset:text_offset + max_chars]
+        window_end = text_offset + len(selected_text)
+        selected_paragraphs = paragraphs if text_offset == 0 else selected_text.splitlines()
         returned_paragraphs = []
         paragraph_text_truncated_count = 0
-        for paragraph in paragraphs[:MAX_RETURN_PARAGRAPHS]:
+        for paragraph in selected_paragraphs[:MAX_RETURN_PARAGRAPHS]:
             if len(paragraph) > MAX_PARAGRAPH_RETURN_CHARS:
                 returned_paragraphs.append(paragraph[:MAX_PARAGRAPH_RETURN_CHARS])
                 paragraph_text_truncated_count += 1
@@ -636,14 +649,17 @@ def inspect_docx_bytes(data: bytes, *, max_chars: int = DEFAULT_INSPECT_CHARS) -
 
         return {
             "package": package,
-            "text": full_text[:max_chars],
+            "text": selected_text,
+            "text_offset": text_offset,
+            "total_chars": len(full_text),
+            "next_text_offset": window_end if window_end < len(full_text) else None,
             "text_sha256": _sha256(full_text.encode("utf-8")),
             "semantic_fingerprint": _semantic_fingerprint(paragraphs),
-            "truncated": len(full_text) > max_chars,
+            "truncated": text_offset > 0 or window_end < len(full_text),
             "paragraphs": returned_paragraphs,
             "paragraph_count": len(paragraphs),
             "paragraphs_returned": len(returned_paragraphs),
-            "paragraphs_truncated": len(paragraphs) > len(returned_paragraphs),
+            "paragraphs_truncated": text_offset > 0 or len(paragraphs) > len(returned_paragraphs),
             "paragraph_text_truncated_count": paragraph_text_truncated_count,
             "structure": {
                 "table_count": table_count,
@@ -708,7 +724,7 @@ class DocxSemanticTools:
         args = validate_inspect_arguments(arguments)
         path, item, digest = self._input(dispatch, args["file_id"])
         before = path.read_bytes()
-        readback = inspect_docx_bytes(before, max_chars=args["max_chars"])
+        readback = inspect_docx_bytes(before, max_chars=args["max_chars"], text_offset=args["text_offset"])
         if _sha256(path.read_bytes()) != digest:
             raise DocxSemanticError("INPUT_INTEGRITY_FAILED", "DOCX inspect modified source bytes", error_kind="terminal")
         return {
@@ -718,6 +734,7 @@ class DocxSemanticTools:
             "size_bytes": item["size_bytes"],
             "sha256": digest,
             "max_chars": args["max_chars"],
+            "text_offset": args["text_offset"],
             "readback": readback,
             "verified": True,
             "engine": "stdlib-ooxml",
@@ -833,7 +850,7 @@ class DocxSemanticTools:
     def verify_inspection_result(self, action: Dict[str, Any], output: Dict[str, Any]) -> Dict[str, Any]:
         args = validate_inspect_arguments(action.get("payload"))
         path, item, digest = self._input(action, args["file_id"])
-        fresh = inspect_docx_bytes(path.read_bytes(), max_chars=args["max_chars"])
+        fresh = inspect_docx_bytes(path.read_bytes(), max_chars=args["max_chars"], text_offset=args["text_offset"])
         if (
             output.get("file_id") != args["file_id"]
             or output.get("sha256") != digest
@@ -849,6 +866,8 @@ class DocxSemanticTools:
             "media_type": DOCX_MIME,
             "size_bytes": item["size_bytes"],
             "sha256": digest,
+            "max_chars": args["max_chars"],
+            "text_offset": args["text_offset"],
             "readback": fresh,
             "verification": {
                 "method": "ooxml_source_reparse",
@@ -901,12 +920,14 @@ class DocxSemanticAdapter:
     def __init__(self, capability_id: str, tools: DocxSemanticTools, *, read_only: bool) -> None:
         self.capability_id = capability_id
         self.tools = tools
+        self.read_only = read_only
+        self.replay_safe = True
         self.execution_profile = ExecutionProfile(
             timeout_seconds=30,
             idempotency_mode="NATURAL_READ_ONLY" if read_only else "EXACT_INPUT",
             retry_mode="SAFE_WITH_SAME_KEY",
             verification_mode="DOCX_SOURCE_READBACK" if read_only else "DOCX_ARTIFACT_READBACK",
-            reconciliation_mode="NONE",
+            reconciliation_mode="SAFE_REREAD" if read_only else "REPLAY_SAME_ATTEMPT",
             max_attempts=1 if read_only else 2,
             retry_backoff_seconds=1,
         )

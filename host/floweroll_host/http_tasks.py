@@ -11,7 +11,7 @@ from starlette.responses import StreamingResponse
 from . import http_schemas as schema
 from .http_common import APIProblem, call, host, legacy_error, router, stopped
 from .read_models import InvalidCursorError
-from .storage import SubmissionConflictError
+from .storage import InvalidPlannerTransitionError, SubmissionConflictError
 
 routes = router(tags=["tasks"])
 
@@ -92,6 +92,29 @@ def task_trace(task_id: str, request: Request):
     return {"task_id": task_id, "events": host(request).storage.trace(task_id)}
 
 
+def _legacy_generic_action_allowed(task: dict, action: dict) -> bool:
+    """The generic action HTTP route is compatibility-only.
+
+    Product execution has source-owned workers (iOS, Function, MCP). The old
+    generic route remains only for the harmless no-Planner device.probe
+    protocol, whose Task has no product submission identity.
+    """
+    return bool(
+        task.get("submission_id") is None
+        and action.get("task_id") == task.get("task_id")
+        and action.get("action_type") == "device.probe"
+    )
+
+
+def _reject_nonlegacy_generic_action() -> None:
+    raise APIProblem(
+        409,
+        "GENERIC_ACTION_ROUTE_NOT_ALLOWED",
+        "Generic action route is compatibility-only",
+        "Product Actions must be executed and completed by their source-owned worker.",
+    )
+
+
 @routes.get("/v1/tasks/{task_id}/next-action", response_model=schema.ActionDispatch, response_model_exclude_unset=True,
             responses={204: {"description": "No action available"}})
 async def next_action(task_id: str, request: Request):
@@ -119,12 +142,21 @@ async def _next_action(
     supports_reconciliation: bool = False,
 ):
     app = host(request)
-    if await call(app.storage.get_task, task_id) is None:
+    task = await call(app.storage.get_task, task_id)
+    if task is None:
         return legacy_error(404, "task not found")
+    if not device:
+        open_action = await call(app.storage.get_open_action, task_id)
+        if open_action is None:
+            # The generic endpoint is not a product worker. Do not wait for a
+            # future source-owned Action to appear after this compatibility poll.
+            return Response(status_code=204)
+        if not _legacy_generic_action_allowed(task, open_action):
+            _reject_nonlegacy_generic_action()
     deadline = time.monotonic() + wait
     while True:
         action = await call(app.execution.next_action, task_id,
-                            source_kind="ios" if device else None, supports_reconciliation=supports_reconciliation)
+                            source_kind="ios", supports_reconciliation=supports_reconciliation)
         if action is not None:
             return {**action, "runtime_action_status": action["status"], "status": "dispatched"}
         current = await call(app.storage.get_task, task_id)
@@ -139,11 +171,64 @@ async def _next_action(
 @routes.post("/v1/tasks/{task_id}/actions/{action_id}/result", response_model=schema.ActionResult, response_model_exclude_unset=True)
 def action_result(task_id: str, action_id: str, body: schema.ActionResultRequest, request: Request):
     app = host(request)
+    task = app.storage.get_task(task_id)
+    action = app.storage.get_action(action_id)
+    if task is None or action is None or action.get("task_id") != task_id:
+        return legacy_error(404, "task/action not found")
+    if not _legacy_generic_action_allowed(task, action):
+        if body.attempt_id is None:
+            raise APIProblem(
+                409,
+                "ACTION_RESULT_ATTEMPT_REQUIRED",
+                "Action Attempt identity is required",
+                "Product Action results must identify the exact source-owned Attempt.",
+            )
+        attempt = app.storage.get_action_attempt(body.attempt_id)
+        if attempt is None or attempt.get("action_id") != action_id:
+            return legacy_error(404, "task/action attempt not found")
+        if attempt.get("source_kind") != "ios":
+            raise APIProblem(
+                409,
+                "ACTION_RESULT_SOURCE_NOT_ALLOWED",
+                "Action result source is not allowed",
+                "Only iOS-owned product Attempts may submit results over HTTP; Host Function/MCP workers complete in-process.",
+            )
     try:
         result = app.execution.accept_result(task_id=task_id, action_id=action_id,
             attempt_id=body.attempt_id, success=body.success, output=body.output, error=body.error)
     except KeyError:
         return legacy_error(404, "task/action not found")
+    app.supervisor.wake()
+    return result
+
+
+@routes.post(
+    "/v1/tasks/{task_id}/actions/{action_id}/reconciliations/definitely-not-started",
+    response_model=schema.ActionResult,
+    response_model_exclude_unset=True,
+)
+def device_definitely_not_started(
+    task_id: str,
+    action_id: str,
+    body: schema.DeviceDefinitelyNotStartedRequest,
+    request: Request,
+):
+    app = host(request)
+    try:
+        result = app.execution.reconcile_device_definitely_not_started(
+            task_id=task_id,
+            action_id=action_id,
+            attempt_id=body.attempt_id,
+        )
+    except KeyError as exc:
+        raise APIProblem(
+            404, "ACTION_ATTEMPT_NOT_FOUND", "Action Attempt not found",
+            "The exact device Attempt does not exist.",
+        ) from exc
+    except InvalidPlannerTransitionError as exc:
+        raise APIProblem(
+            409, "RECONCILIATION_STATE_CONFLICT", "Reconciliation state conflict", str(exc)
+        ) from exc
     app.supervisor.wake()
     return result
 

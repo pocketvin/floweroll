@@ -62,6 +62,7 @@ completion banner、Inbox、待看/review 都是 presentation semantics，不是
 
 - 完整独立目标 → 新 Task；
 - 明确针对当前 Task 的继续、修改、回答、取消 → 当前 Task；
+- Home 当前 Thread 正在等待 clarification 时，短答案按问题形态精确绑定；较长文本只有在同时引用同一 pending 对象并表达明确流程控制（如“先查询这条提醒，再按原计划”）时才作为该 clarification 的回复，不能因长度退化成新 Task；
 - 仅因为存在活动 Task，不能把下一句话吞进去；
 - 混合“改当前任务 + 再做一个新目标”必须保留两部分语义。
 

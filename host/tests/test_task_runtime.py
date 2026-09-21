@@ -7,7 +7,7 @@ import unittest
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from floweroll_host.capabilities_v0 import REMINDER_CREATE, WEATHER_QUERY
+from floweroll_host.capabilities_v0 import REMINDER_CREATE, REMINDER_QUERY, WEATHER_QUERY
 from floweroll_host.planner_contracts import CapabilitySpec, PlannerDecision
 from floweroll_host.storage import (
     InvalidPlannerTransitionError,
@@ -16,7 +16,13 @@ from floweroll_host.storage import (
 )
 from floweroll_host.task_capability_policy import TASK_DENIED, TaskCapabilityDeniedError
 from floweroll_host.task_runtime import PlannerAlreadyRunningError, TaskRuntime
-from floweroll_host.transition_engine import RuntimeSnapshot, TransitionEngine
+from floweroll_host.transition_engine import (
+    InteractionState,
+    RuntimePhase,
+    RuntimeSnapshot,
+    TaskLifecycle,
+    TransitionEngine,
+)
 
 
 NOW = datetime(2026, 9, 10, 18, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
@@ -206,6 +212,38 @@ class ForcedDeniedPlanner:
 
 
 class TransitionEngineTests(unittest.TestCase):
+    def test_snapshot_keeps_lifecycle_interaction_and_phase_orthogonal(self) -> None:
+        active_with_question = RuntimeSnapshot(
+            task_status="active",
+            phase="executing",
+            runtime_revision=2,
+            has_open_action=True,
+            pending_clarification_id="clar-1",
+            wait_kind=None,
+            cancel_requested=False,
+            accepted_event_types=frozenset(),
+        )
+        self.assertEqual(active_with_question.lifecycle, TaskLifecycle.ACTIVE)
+        self.assertEqual(active_with_question.interaction, InteractionState.CLARIFICATION)
+        self.assertEqual(active_with_question.runtime_phase, RuntimePhase.EXECUTING)
+        self.assertEqual(
+            TransitionEngine().next(active_with_question).reason,
+            "action_owned_by_execution",
+        )
+
+        legacy_needs_user = RuntimeSnapshot(
+            task_status="needs_user",
+            phase="planning",
+            runtime_revision=0,
+            has_open_action=False,
+            pending_clarification_id="clar-legacy",
+            wait_kind="user_input",
+            cancel_requested=False,
+            accepted_event_types=frozenset(),
+        )
+        self.assertEqual(legacy_needs_user.lifecycle, TaskLifecycle.WAITING)
+        self.assertEqual(legacy_needs_user.interaction, InteractionState.CLARIFICATION)
+
     def test_pure_routing_distinguishes_planning_wait_and_cancel(self) -> None:
         engine = TransitionEngine()
         base = dict(
@@ -232,8 +270,74 @@ class TransitionEngineTests(unittest.TestCase):
         cancelled["accepted_event_types"] = frozenset({"CANCEL_REQUEST"})
         self.assertEqual(engine.next(RuntimeSnapshot(**cancelled)).kind, "HANDLE_CANCELLATION")
 
+        unknown = dict(base)
+        unknown["task_status"] = "future_status"
+        unknown_snapshot = RuntimeSnapshot(**unknown)
+        self.assertEqual(unknown_snapshot.lifecycle, TaskLifecycle.UNKNOWN)
+        self.assertEqual(engine.next(unknown_snapshot).kind, "YIELD")
+        self.assertEqual(engine.next(unknown_snapshot).reason, "unknown_task_lifecycle")
+
+        unknown_cancel = dict(unknown)
+        unknown_cancel["cancel_requested"] = True
+        self.assertEqual(
+            engine.next(RuntimeSnapshot(**unknown_cancel)).kind,
+            "HANDLE_CANCELLATION",
+            "cancellation must remain available even when lifecycle truth is anomalous",
+        )
+
+    def test_storage_rejects_unknown_task_status_at_public_write_boundaries(self) -> None:
+        store = Storage(":memory:")
+        with self.assertRaisesRegex(ValueError, "invalid Task status"):
+            store.create_task(
+                "invalid-status-create",
+                "should not persist",
+                "unit",
+                {},
+                status="future_status",
+            )
+
+        task = store.create_task(
+            "valid-status-task",
+            "valid",
+            "unit",
+            {},
+            status="active",
+        )
+        with self.assertRaisesRegex(ValueError, "invalid Task status"):
+            store.set_task_runtime(
+                task_id=task["task_id"],
+                status="future_status",
+                phase="planning",
+                plan=[],
+                wait_reason=None,
+                wait_payload=None,
+                pending_clarification_id=None,
+                interpreted_goal_summary=None,
+            )
+        self.assertEqual(store.get_task(task["task_id"])["status"], "active")
+
 
 class TaskRuntimeTests(unittest.TestCase):
+    def test_close_delegates_to_memory_owner(self) -> None:
+        class Memory:
+            def __init__(self) -> None:
+                self.close_calls = 0
+
+            def close(self) -> None:
+                self.close_calls += 1
+
+        memory = Memory()
+        runtime = TaskRuntime(
+            Storage(":memory:"),
+            QueuePlanner([make_decision()]),
+            CAPABILITIES,
+            memory=memory,
+        )
+
+        runtime.close()
+        runtime.close()
+        self.assertEqual(memory.close_calls, 1, "TaskRuntime.close must be idempotent")
+
     def test_task_policy_filters_initial_working_set_and_forced_denied_decision(self) -> None:
         store = Storage(":memory:")
         planner = ForcedDeniedPlanner()
@@ -583,6 +687,136 @@ class TaskRuntimeTests(unittest.TestCase):
                 text="十点",
                 reply_clarification_id=clarification_id,
             )
+
+    def test_deferred_destructive_confirmation_cancels_stale_clarification_before_prerequisite_read(self) -> None:
+        store = Storage(":memory:")
+        capabilities = [REMINDER_CREATE, REMINDER_QUERY, WEATHER_QUERY]
+        query_decision = PlannerDecision.from_dict(
+            {
+                "decision_type": "EXECUTE",
+                "interpreted_goal_summary": "先查询确认提醒仍然存在",
+                "plan_update": ["查询提醒", "稍后重新确认删除"],
+                "action": {
+                    "capability": "reminder.query",
+                    "arguments": {"reminder_id": "reminder-exact"},
+                },
+                "on_verified": "REPLAN",
+                "clarification": None,
+                "wait": None,
+                "completion": None,
+                "stop_reason": None,
+                "cancellation": None,
+                "state_update": {
+                    "pending_clarification": "KEEP",
+                    "current_task_brief": None,
+                },
+            },
+            capabilities,
+        )
+        planner = QueuePlanner(
+            [
+                make_decision(
+                    decision_type="CLARIFY",
+                    interpreted_goal_summary="删除提醒前需要确认",
+                    clarification={
+                        "question": "是否删除这条提醒？",
+                        "suggested_options": [],
+                        "accepts_text": True,
+                        "reason": "删除是破坏性操作，需要用户确认",
+                    },
+                    completion=None,
+                ),
+                query_decision,
+            ]
+        )
+        runtime = TaskRuntime(store, planner, capabilities)
+        task = runtime.create_task("创建后查询并删除提醒")
+        first = runtime.decide(task["task_id"], current_time=NOW)
+        clarification_id = first["clarification"]["clarification_id"]
+        runtime.admit_user_turn(
+            task["task_id"],
+            event_id="defer-delete-confirmation",
+            text="先查询确认这条提醒确实存在，再继续按原计划；真正删除时再向我确认。",
+            reply_clarification_id=clarification_id,
+        )
+
+        second = runtime.decide(task["task_id"], current_time=NOW)
+
+        self.assertEqual(second["decision"]["decision"]["state_update"]["pending_clarification"], "CANCEL")
+        self.assertEqual(second["action"]["action_type"], "reminder.query")
+        self.assertIsNone(store.pending_clarification(task["task_id"]))
+        clarification = store.get_clarification(clarification_id)
+        assert clarification is not None
+        self.assertEqual(clarification["status"], "cancelled")
+        self.assertEqual(store.inbox_events(task["task_id"])[0]["status"], "CONSUMED")
+        traces = store.trace(task["task_id"])
+        regrounded = next(
+            row for row in traces
+            if row["event_type"] == "planner.pending_clarification.regrounded"
+        )
+        self.assertEqual(
+            regrounded["data"]["reason"],
+            "user_deferred_destructive_confirmation_until_after_prerequisite",
+        )
+
+    def test_non_destructive_clarification_can_stay_pending_during_safe_read(self) -> None:
+        store = Storage(":memory:")
+        keep_decision = PlannerDecision.from_dict(
+            {
+                "decision_type": "EXECUTE",
+                "interpreted_goal_summary": "先查天气，住宿区域仍待用户决定",
+                "plan_update": None,
+                "action": {"capability": "weather.query", "arguments": {"location": "上海", "date": "2026-09-11"}},
+                "on_verified": "REPLAN",
+                "clarification": None,
+                "wait": None,
+                "completion": None,
+                "stop_reason": None,
+                "cancellation": None,
+                "state_update": {
+                    "pending_clarification": "KEEP",
+                    "current_task_brief": None,
+                },
+            },
+            CAPABILITIES,
+        )
+        planner = QueuePlanner(
+            [
+                make_decision(
+                    decision_type="CLARIFY",
+                    interpreted_goal_summary="需要选择住宿区域",
+                    clarification={
+                        "question": "你想住在哪个区域？",
+                        "suggested_options": [],
+                        "accepts_text": True,
+                        "reason": "住宿区域偏好需要用户决定",
+                    },
+                    completion=None,
+                ),
+                keep_decision,
+            ]
+        )
+        runtime = TaskRuntime(store, planner, CAPABILITIES)
+        task = runtime.create_task("规划上海住宿")
+        first = runtime.decide(task["task_id"], current_time=NOW)
+        clarification_id = first["clarification"]["clarification_id"]
+        runtime.admit_user_turn(
+            task["task_id"],
+            event_id="defer-hotel-choice",
+            text="先查天气，我稍后决定住哪里",
+            reply_clarification_id=clarification_id,
+        )
+
+        second = runtime.decide(task["task_id"], current_time=NOW)
+
+        self.assertEqual(second["decision"]["decision"]["state_update"]["pending_clarification"], "KEEP")
+        pending = store.pending_clarification(task["task_id"])
+        assert pending is not None
+        self.assertEqual(pending["clarification_id"], clarification_id)
+        self.assertFalse(any(
+            row["event_type"] == "planner.pending_clarification.regrounded"
+            for row in store.trace(task["task_id"])
+        ))
 
     def test_resolved_clarification_closes_same_public_timeline_item(self) -> None:
         store = Storage(":memory:")

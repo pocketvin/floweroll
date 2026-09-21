@@ -70,6 +70,7 @@ struct ContentView: View {
             guard scenePhase == .active else { return }
             while !Task.isCancelled {
                 await runtimeStore.refreshPresentationIndex()
+                await runtimeStore.recoverForegroundWork()
                 runtimeStore.reconcileCompletionAttention()
                 do {
                     try await Task.sleep(for: .seconds(AppShellCompletionAttentionPolicy.presentationIndexPollSeconds))

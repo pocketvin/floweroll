@@ -1131,4 +1131,21 @@ final class LocationCurrentVerifierTests: XCTestCase {
         )
         XCTAssertEqual(failure?.status, "SERVICES_DISABLED")
     }
+
+    @MainActor
+    func testCancelledOneShotLocationReturnsWithoutWaitingForTimeout() async {
+        let client = CoreLocationOneShotClient()
+        let startedAt = Date()
+        let task = Task { @MainActor in
+            await Task.yield()
+            return await client.request(timeoutSeconds: 60)
+        }
+        task.cancel()
+
+        let result = await task.value
+        guard case .cancelled = result else {
+            return XCTFail("a cancelled location request must not wait for Core Location or timeout")
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(startedAt), 1)
+    }
 }

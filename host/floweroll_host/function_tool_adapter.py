@@ -11,6 +11,11 @@ class FunctionToolAdapter:
     The adapter owns retry/idempotency semantics while a separate execution
     worker invokes the concrete function. This keeps local/API functions on
     the same durable Action -> Attempt -> verification path as MCP/iOS tools.
+
+    A write function must explicitly opt into replay-safe semantics. Host death
+    can leave the same durable Attempt IN_FLIGHT, so implicit write replay is
+    forbidden unless the implementation is idempotent under the exact Action
+    identity/input.
     """
 
     def __init__(
@@ -19,17 +24,24 @@ class FunctionToolAdapter:
         capability_id: str,
         source_kind: str,
         read_only: bool = True,
+        replay_safe: bool = False,
         timeout_seconds: int = 15,
         max_attempts: int = 2,
     ) -> None:
+        if not read_only and not replay_safe:
+            raise ValueError(
+                "non-read-only FunctionToolAdapter requires explicit replay_safe=True"
+            )
         self.capability_id = capability_id
         self.source_kind = source_kind
+        self.read_only = read_only
+        self.replay_safe = read_only or replay_safe
         self.execution_profile = ExecutionProfile(
             timeout_seconds=timeout_seconds,
             idempotency_mode="NATURAL_READ_ONLY" if read_only else "EXACT_INPUT",
             retry_mode="SAFE_WITH_SAME_KEY",
             verification_mode="FUNCTION_RESULT",
-            reconciliation_mode="NONE",
+            reconciliation_mode="SAFE_REREAD" if read_only else "REPLAY_SAME_ATTEMPT",
             max_attempts=max_attempts,
             retry_backoff_seconds=1,
         )

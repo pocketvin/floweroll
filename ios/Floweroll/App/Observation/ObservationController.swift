@@ -34,6 +34,7 @@ final class ObservationController {
     @ObservationIgnored private var syncTask: Task<Void, Never>?
     @ObservationIgnored private var statusTask: Task<Void, Never>?
     @ObservationIgnored private var notificationTokens: [NSObjectProtocol] = []
+    @ObservationIgnored private var audioSessionNotificationTokens: [NotificationCenter.ObservationToken] = []
     @ObservationIgnored private var syncBusy = false
     @ObservationIgnored private var foreground = true
     @ObservationIgnored private var lastIssueAt: [String: Double] = [:]
@@ -81,17 +82,23 @@ final class ObservationController {
         notificationTokens.append(center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.setForeground(true) }
         })
-        notificationTokens.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] notification in
-            let value = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
-            Task { @MainActor in
-                guard let self else { return }
-                if value == AVAudioSession.InterruptionType.began.rawValue {
-                    self.handleAudioInterruptionBegan()
-                } else if value == AVAudioSession.InterruptionType.ended.rawValue {
-                    self.handleAudioInterruptionEnded()
-                }
+        let audioSession = AVAudioSession.sharedInstance()
+        audioSessionNotificationTokens.append(
+            center.addObserver(of: audioSession, for: .didBecomeInactive) { [weak self] message in
+                guard let self,
+                      Self.audioDeactivationIsSystemInterruption(message.deactivationResult)
+                else { return }
+                self.handleAudioInterruptionBegan()
             }
-        })
+        )
+        audioSessionNotificationTokens.append(
+            center.addObserver(of: audioSession, for: .resumptionRecommendation) { [weak self] message in
+                guard let self,
+                      Self.audioResumptionShouldResume(message.recommendation)
+                else { return }
+                self.handleAudioInterruptionEnded()
+            }
+        )
         notificationTokens.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] notification in
             let reason = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
             if reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue || reason == AVAudioSession.RouteChangeReason.newDeviceAvailable.rawValue {
@@ -138,6 +145,18 @@ final class ObservationController {
             }
         }
         if record != nil { startSyncLoop() }
+    }
+
+    isolated deinit {
+        statusTask?.cancel()
+        syncTask?.cancel()
+        let center = NotificationCenter.default
+        for token in notificationTokens {
+            center.removeObserver(token)
+        }
+        for token in audioSessionNotificationTokens {
+            center.removeObserver(token)
+        }
     }
 
     var phase: ObservationPhase { record?.phase ?? .setup }
@@ -393,6 +412,23 @@ final class ObservationController {
         if phase == .observing, activeSources.contains(.ambientMicrophone) {
             try? AVAudioSession.sharedInstance().setActive(true)
         }
+    }
+    nonisolated static func audioDeactivationIsSystemInterruption(
+        _ result: AVAudioSession.DeactivationResult
+    ) -> Bool {
+        switch result {
+        case .systemInterruption:
+            return true
+        case .appDeactivated:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+    nonisolated static func audioResumptionShouldResume(
+        _ recommendation: AVAudioSession.ResumptionRecommendation
+    ) -> Bool {
+        recommendation == .shouldResume
     }
     nonisolated static func microphoneInputAdvanced(since baseline: Double?, latest: Double?) -> Bool {
         guard let latest else { return false }

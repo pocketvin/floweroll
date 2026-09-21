@@ -264,32 +264,22 @@ struct TaskScopedContinuationReservationLedger: Equatable {
 
 enum ContinuedTaskStableStatePolicy {
     static func shouldHoldForTaskScopedMutation(
-        status: String,
-        hasPendingInteraction: Bool,
+        state: RuntimeTaskStateDimensions,
         hasTaskScopedMutationReservation: Bool
     ) -> Bool {
         guard hasTaskScopedMutationReservation else { return false }
-        let normalized = status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !["completed", "failed", "cancelled"].contains(normalized) else { return false }
-        return hasPendingInteraction || normalized == "needs_user"
+        guard !state.lifecycle.isTerminal else { return false }
+        return state.interaction.requiresUser
     }
 
-    /// A pending interaction does not imply that the whole Task is blocked.
-    /// Host may intentionally keep a Task `active` while already-authorized work
-    /// continues and a separate clarification remains unanswered. Release the
-    /// iPhone execution owner only when Host lifecycle truth says execution is
-    /// actually waiting on / blocked by the user.
-    static func shouldReleaseForPendingInteraction(
-        status: String,
-        hasPendingInteraction: Bool
+    /// UI nonterminal state and device-execution eligibility are different.
+    /// Active plus clarification may still execute authorized work; user-input
+    /// waits and blocked/paused Tasks should relinquish the current iPhone owner.
+    static func shouldReleaseExecutionOwner(
+        state: RuntimeTaskStateDimensions
     ) -> Bool {
-        guard hasPendingInteraction else { return false }
-        switch status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-        case "waiting", "needs_user", "blocked":
-            return true
-        default:
-            return false
-        }
+        guard !state.lifecycle.isTerminal else { return false }
+        return !RuntimeTaskExecutionEligibilityPolicy.requiresDeviceExecution(state)
     }
 }
 
@@ -305,6 +295,16 @@ enum ContinuedTaskStableStatePolicy {
 enum FlowerollTaskTerminalNotificationPolicy {
     static func shouldSchedule(appIsActive: Bool) -> Bool {
         !appIsActive
+    }
+}
+
+
+enum ContinuedTaskTrackingReconciliationPolicy {
+    static func orphanedContinuedTaskIDs(
+        trackedTaskIDs: Set<String>,
+        continuedTaskIDs: Set<String>
+    ) -> Set<String> {
+        continuedTaskIDs.subtracting(trackedTaskIDs)
     }
 }
 
@@ -564,17 +564,29 @@ final class DeviceBackgroundExecutionController {
     }
 
     func reconcileTrackedTasks(activeTaskIDs: Set<String>) {
-        let existing = Set(trackedTaskIDs())
-        let removed = existing.subtracting(activeTaskIDs)
-        guard !removed.isEmpty else { return }
-        for taskID in removed {
+        let existingTracked = Set(trackedTaskIDs())
+        let removedTracked = existingTracked.subtracting(activeTaskIDs)
+        let orphanedContinued = ContinuedTaskTrackingReconciliationPolicy.orphanedContinuedTaskIDs(
+            trackedTaskIDs: existingTracked,
+            continuedTaskIDs: Set(continuedTaskIDs())
+        )
+
+        for taskID in removedTracked {
             untrack(taskID)
-            untrackContinuedTask(taskID)
             globalTaskProgress.removeValue(forKey: taskID)
             recordDiagnostic(
                 event: "tracking_finished",
                 taskID: taskID,
                 identifier: Self.recoveryIdentifier
+            )
+        }
+        for taskID in orphanedContinued {
+            untrackContinuedTask(taskID)
+            globalTaskProgress.removeValue(forKey: taskID)
+            recordDiagnostic(
+                event: "continued_tracking_orphan_removed",
+                taskID: taskID,
+                identifier: Self.globalContinuedIdentifier
             )
         }
     }
@@ -916,7 +928,11 @@ final class DeviceBackgroundExecutionController {
             guard BackgroundRecoveryRequestPolicy.shouldSubmit(
                 identifier: Self.recoveryIdentifier,
                 pendingIdentifiers: pendingIdentifiers
-            ) else { return }
+            ) else {
+                self.recordDiagnostic(event: "recovery_request_already_queued", taskID: "__recovery__",
+                                      identifier: Self.recoveryIdentifier, detail: "reason=\(reason)")
+                return
+            }
             let request = BGProcessingTaskRequest(identifier: Self.recoveryIdentifier)
             request.requiresNetworkConnectivity = true
             request.requiresExternalPower = false
@@ -1043,6 +1059,7 @@ final class DeviceBackgroundExecutionController {
     // MARK: - Durable outbox / device execution pass
 
     private func runRecoveryPass(includeDeviceActions: Bool) async -> Bool {
+        if includeDeviceActions { await AlarmConfigurationReplacement.recoverManualUpdates() }
         let pendingStore = PendingSubmissionStore.shared
         let submissions = await pendingStore?.pending() ?? []
         let userTurns = await pendingStore?.pendingUserTurns() ?? []
@@ -1146,24 +1163,26 @@ final class DeviceBackgroundExecutionController {
     /// Returns true when no further device execution is required for this Task.
     private func consumeStableTaskState(_ view: HostTaskView) async -> Bool {
         let taskID = view.task.taskID
-        let status = view.task.status.lowercased()
-        let hasPendingInteraction = view.pendingInteraction != nil
+        let state = view.runtimeStateDimensions
         if ContinuedTaskStableStatePolicy.shouldHoldForTaskScopedMutation(
-            status: status,
-            hasPendingInteraction: hasPendingInteraction,
+            state: state,
             hasTaskScopedMutationReservation: taskScopedMutationReservations.contains(taskID: taskID)
         ) {
             return false
         }
-        if ContinuedTaskStableStatePolicy.shouldReleaseForPendingInteraction(
-            status: status,
-            hasPendingInteraction: hasPendingInteraction
+        if ContinuedTaskStableStatePolicy.shouldReleaseExecutionOwner(
+            state: state
         ) {
             untrack(taskID)
             return true
         }
-        switch status {
-        case "completed":
+        if state.lifecycle.isTerminal,
+           RuntimeTaskHistoryPresentationState(defaults: defaults).isHidden(taskID: taskID) {
+            untrack(taskID)
+            return true
+        }
+        switch state.lifecycle {
+        case .completed:
             untrack(taskID)
             await FlowerollTaskNotifications.notifyTerminalIfNeeded(
                 taskID: taskID,
@@ -1173,7 +1192,7 @@ final class DeviceBackgroundExecutionController {
                     ?? view.task.goal
             )
             return true
-        case "failed":
+        case .failed:
             untrack(taskID)
             await FlowerollTaskNotifications.notifyTerminalIfNeeded(
                 taskID: taskID,
@@ -1183,10 +1202,10 @@ final class DeviceBackgroundExecutionController {
                     ?? view.task.goal
             )
             return true
-        case "cancelled", "needs_user":
+        case .cancelled:
             untrack(taskID)
             return true
-        default:
+        case .active, .waiting, .blocked, .unknown:
             return false
         }
     }
@@ -1265,6 +1284,8 @@ final class DeviceBackgroundExecutionController {
     }
 
     private func untrack(_ taskID: String) {
+        untrackContinuedTask(taskID)
+        globalTaskProgress.removeValue(forKey: taskID)
         var ids = Set(trackedTaskIDs())
         ids.remove(taskID)
         defaults.set(ids.sorted(), forKey: Self.trackedTaskIDsKey)

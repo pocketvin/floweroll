@@ -51,12 +51,11 @@ actor FakePhotoLibraryClient: PhotoLibraryClient {
 final class PhotoLibrarySaveTests: XCTestCase {
     private var temporaryDirectories: [URL] = []
 
-    override func tearDown() {
+    override func tearDown() async throws {
         for directory in temporaryDirectories {
             try? FileManager.default.removeItem(at: directory)
         }
         temporaryDirectories.removeAll()
-        super.tearDown()
     }
 
     private func makeDirectory() throws -> URL {

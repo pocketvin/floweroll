@@ -30,6 +30,7 @@ EXPECTED_OPERATIONS = {
     ("GET", "/v1/tasks/{task_id}/next-action"),
     ("GET", "/v1/tasks/{task_id}/next-device-action"),
     ("POST", "/v1/tasks/{task_id}/actions/{action_id}/result"),
+    ("POST", "/v1/tasks/{task_id}/actions/{action_id}/reconciliations/definitely-not-started"),
     ("GET", "/v1/tasks/{task_id}/stream"),
     ("POST", "/v1/tasks/{task_id}/turns"),
     ("POST", "/v1/tasks/{task_id}/clarifications/{clarification_id}/responses"),

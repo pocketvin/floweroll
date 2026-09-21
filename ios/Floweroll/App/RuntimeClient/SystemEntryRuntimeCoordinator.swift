@@ -25,38 +25,37 @@ enum SystemEntryProgressPresentationPolicy {
     static let activeCeilingUnitCount: Int64 = 95
 
     static func counts(from view: HostTaskView) -> (completed: Int64, total: Int64) {
-        let status = view.task.status.lowercased()
-        // Durable terminal Host truth always wins over stale interaction rows.
-        switch status {
-        case "completed", "cancelled", "failed", "blocked":
+        let state = view.runtimeStateDimensions
+        // Terminal Host truth and a durable blocked/pause boundary end the
+        // current system presentation session.
+        switch state.lifecycle {
+        case .completed, .cancelled, .failed, .blocked:
             return (totalUnitCount, totalUnitCount)
-        default:
+        case .active, .waiting, .unknown:
             break
         }
-        if view.pendingInteraction != nil || status == "needs_user" {
+        if state.interaction.requiresUser {
             // Waiting for the person is not business completion. Keep the
             // system progress visibly unfinished until Host reaches a terminal
             // state or iOS ends this execution session.
             return (activeCeilingUnitCount, totalUnitCount)
         }
-        switch status {
-        default:
-            // ACTIVE and WAITING without a user-input boundary remain real work.
-            // Prefer Host-verified work counts; never invent time-based progress.
-            guard let summary = view.workSummary,
-                  let fraction = summary.fraction
-            else {
-                return (activeFloorUnitCount, totalUnitCount)
-            }
-            let bounded = min(1, max(0, fraction))
-            let span = activeCeilingUnitCount - activeFloorUnitCount
-            let mapped = activeFloorUnitCount
-                + Int64((Double(span) * bounded).rounded(.down))
-            return (
-                min(activeCeilingUnitCount, max(activeFloorUnitCount, mapped)),
-                totalUnitCount
-            )
+
+        // ACTIVE and WAITING without a user-input boundary remain real work.
+        // Prefer Host-verified work counts; never invent time-based progress.
+        guard let summary = view.workSummary,
+              let fraction = summary.fraction
+        else {
+            return (activeFloorUnitCount, totalUnitCount)
         }
+        let bounded = min(1, max(0, fraction))
+        let span = activeCeilingUnitCount - activeFloorUnitCount
+        let mapped = activeFloorUnitCount
+            + Int64((Double(span) * bounded).rounded(.down))
+        return (
+            min(activeCeilingUnitCount, max(activeFloorUnitCount, mapped)),
+            totalUnitCount
+        )
     }
 }
 
@@ -120,7 +119,7 @@ enum TaskScopedOperation: Sendable, Equatable {
 struct SystemEntryRuntimeOutcome: Sendable, Equatable {
     enum State: Sendable, Equatable {
         case completed
-        case needsUser
+        case blocked
         case cancelled
         case failed
         case delegated
@@ -438,6 +437,7 @@ actor SystemEntryRuntimeCoordinator {
                 )
                 break
             }
+
             guard let pendingStore else { throw RuntimeTaskStoreError.pendingStoreUnavailable }
             let pending = try await pendingStore.createUserTurn(
                 taskID: taskID,
@@ -445,16 +445,26 @@ actor SystemEntryRuntimeCoordinator {
                 attachments: attachments,
                 eventID: submissionID
             )
-            if attachments.isEmpty {
-                _ = try await client.submitExistingUserTurn(pending, pendingStore: pendingStore)
-            } else {
-                // Draft attachments are pre-uploaded by Home as soon as they are
-                // added. Persisting this exact event is enough for the active
-                // long-running loop / URLSession wake / BGProcessing to finish
-                // Host admission without creating a duplicate system owner.
-                for attachment in attachments {
-                    Task { try? await client.uploadTaskAttachment(attachment) }
-                }
+            // Persist before any network work. If this AppIntent is reclaimed,
+            // BGProcessing/background-URLSession recovery can replay the exact
+            // event_id without creating a second execution owner.
+            await scheduleRecovery(reason: "home_joined_existing_user_turn_persisted")
+
+            // Draft selection may already have started a background URLSession
+            // upload. Explicit Send must not wait for iOS to schedule those
+            // bytes: take over the same resumable file ID immediately, then
+            // admit this exact user turn while the existing LongRunningIntent
+            // continues to own task execution/presentation.
+            for attachment in attachments {
+                _ = try await client.uploadTaskAttachment(
+                    attachment,
+                    executionMode: .immediateResumable
+                )
+            }
+            _ = try await client.submitExistingUserTurn(pending, pendingStore: pendingStore)
+            let acceptedAttachmentIDs = Set(attachments.map(\.id))
+            await MainActor.run {
+                TaskAttachmentDraft.clearAcceptedReferences(acceptedAttachmentIDs)
             }
         case .pendingInteraction:
             guard attachments.isEmpty else {
@@ -702,6 +712,10 @@ actor SystemEntryRuntimeCoordinator {
         invocationSource: String
     ) async throws -> SystemEntryInputRoute {
         let taskID = try await submit(text: text, invocationSource: invocationSource)
+        // LongRunningIntent owns the immediate system execution window, while
+        // trackedTaskIDs preserves recovery eligibility if iOS reclaims it.
+        // Do not add this Task to continuedTaskIDs: that set belongs to BGCPT.
+        await trackDurableTask(taskID, reason: "system_entry_task_admitted")
         _ = activeExecutionTaskIDs.insert(taskID)
         return SystemEntryInputRoute(
             taskID: taskID,
@@ -720,6 +734,12 @@ actor SystemEntryRuntimeCoordinator {
             ownership: .systemEntry
         )
 
+        // Recovery eligibility is independent from whichever system window
+        // currently owns execution. Re-assert it before removing the BGCPT owner.
+        await trackDurableTask(
+            current.taskID,
+            reason: "system_entry_current_task_handoff"
+        )
         await DeviceBackgroundExecutionController.shared.handoffInAppTaskToSystemLongRunning(
             taskID: current.taskID,
             reason: "explicit_system_entry_continuation"
@@ -870,6 +890,11 @@ actor SystemEntryRuntimeCoordinator {
         }
     }
 
+    func hasActiveSystemExecution(taskID: String) -> Bool {
+        let normalized = taskID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !normalized.isEmpty && activeExecutionTaskIDs.contains(normalized)
+    }
+
     func releaseExecutionReservation(taskID: String) {
         activeExecutionTaskIDs.remove(taskID)
     }
@@ -910,39 +935,46 @@ actor SystemEntryRuntimeCoordinator {
                 includeDeviceActions: false
             )
             let view = try await client.fetchTaskView(taskID: taskID)
-            let status = view.task.status.lowercased()
+            let state = view.runtimeStateDimensions
             await onProgress?(Self.progressUpdate(from: view))
 
-            switch status {
-            case "completed":
+            switch state.lifecycle {
+            case .completed:
                 let message = Self.resultSummary(from: view) ?? "任务已完成"
                 return SystemEntryRuntimeOutcome(
                     taskID: taskID,
                     state: .completed,
                     message: message
                 )
-            case "waiting", "needs_user":
+            case .waiting:
                 // A needs-user boundary is not completion. LongRunningIntent
                 // stays alive and keeps reporting the durable Host state for as
                 // long as iOS grants this execution session. If iOS reclaims
                 // it first, Host truth remains and BGProcessing can recover.
                 try? await Task.sleep(for: .milliseconds(500))
                 continue
-            case "cancelled":
+            case .cancelled:
                 let message = "任务已取消"
                 return SystemEntryRuntimeOutcome(
                     taskID: taskID,
                     state: .cancelled,
                     message: message
                 )
-            case "failed", "blocked":
+            case .blocked:
+                let message = Self.resultSummary(from: view) ?? "任务已暂停，可稍后继续"
+                return SystemEntryRuntimeOutcome(
+                    taskID: taskID,
+                    state: .blocked,
+                    message: message
+                )
+            case .failed:
                 let message = Self.resultSummary(from: view) ?? "任务暂时无法继续"
                 return SystemEntryRuntimeOutcome(
                     taskID: taskID,
                     state: .failed,
                     message: message
                 )
-            default:
+            case .active, .unknown:
                 break
             }
 
@@ -1090,31 +1122,28 @@ actor SystemEntryRuntimeCoordinator {
 
     static func progressUpdate(from view: HostTaskView) -> SystemEntryRuntimeProgressUpdate {
         let counts = SystemEntryProgressPresentationPolicy.counts(from: view)
-        let status = view.task.status.lowercased()
+        let state = view.runtimeStateDimensions
         let title: String
         let subtitle: String
-        switch status {
-        case "completed":
+        switch state.lifecycle {
+        case .completed:
             title = "小卷已完成"
             subtitle = resultSummary(from: view) ?? "已经完成你交代的任务"
-        case "cancelled":
+        case .cancelled:
             title = "小卷已取消"
             subtitle = "已经停止后续处理"
-        case "waiting":
-            if view.pendingInteraction != nil {
+        case .waiting:
+            if state.interaction.requiresUser {
                 title = "小卷需要你确认"
                 subtitle = pendingInteractionSummary(from: view) ?? "打开花卷继续这个任务"
             } else {
                 title = "小卷正在处理"
                 subtitle = activeSummary(from: view) ?? "正在等待下一步"
             }
-        case "needs_user":
-            title = "小卷需要你确认"
-            subtitle = pendingInteractionSummary(from: view) ?? "打开花卷继续这个任务"
-        case "failed", "blocked":
+        case .failed, .blocked:
             title = "小卷暂时无法继续"
             subtitle = resultSummary(from: view) ?? "打开花卷查看详情"
-        default:
+        case .active, .unknown:
             title = "小卷正在处理"
             subtitle = activeSummary(from: view) ?? "正在处理"
         }

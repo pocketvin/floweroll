@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import threading
 from typing import Any, Callable, Dict, Mapping, Optional
 
 from .agent_loop import AgentLoop
@@ -51,6 +52,12 @@ class HostApp:
         task_asset_root: Optional[Path] = None,
         progressive_discovery: bool = False,
     ):
+        self._close_lock = threading.Lock()
+        self._closed = False
+        self._task_assets_closed = False
+        self._task_runtime_closed = False
+        self._planner_drained = True
+        self._function_drained = True
         self.storage = Storage(db_path)
         self.developer_observability = DeveloperObservabilityService.from_environment(db_path)
         self.recovery = RecoveryCoordinator(self.storage)
@@ -152,6 +159,11 @@ class HostApp:
         )
         if self.task_runtime is not None:
             self.task_runtime.capability_registry = self.capability_registry
+            self.task_runtime.predispatch_confirmation_capabilities = {
+                capability_id
+                for capability_id, adapter in self.execution.adapters.items()
+                if callable(getattr(adapter, "predispatch_confirmation", None))
+            }
             self.developer_observability.planner_description = self.task_runtime.planner_graph.describe()
         if self.task_runtime is not None and self.task_assets is not None:
             self.task_runtime.material_context_provider = self.task_assets.context
@@ -307,11 +319,73 @@ class HostApp:
         current = self.storage.get_task(task["task_id"]) or task
         return {**current, "idempotent_replay": not created}
 
+    def _close_task_runtime_once(self) -> None:
+        with self._close_lock:
+            if self.task_runtime is None or self._task_runtime_closed:
+                return
+            self._task_runtime_closed = True
+            runtime = self.task_runtime
+        closer = getattr(runtime, "close", None)
+        if callable(closer):
+            closer()
+
+    def _close_task_assets_once(self) -> None:
+        with self._close_lock:
+            if self.task_assets is None or self._task_assets_closed:
+                return
+            self._task_assets_closed = True
+            assets = self.task_assets
+        assets.close()
+
+    def _maybe_close_task_assets(self) -> None:
+        with self._close_lock:
+            ready = (
+                self._closed
+                and self._planner_drained
+                and self._function_drained
+                and not self._task_assets_closed
+            )
+        if ready:
+            self._close_task_assets_once()
+
+    def _planner_did_drain(self) -> None:
+        with self._close_lock:
+            self._planner_drained = True
+        self._close_task_runtime_once()
+        self._maybe_close_task_assets()
+
+    def _function_did_drain(self) -> None:
+        with self._close_lock:
+            self._function_drained = True
+        self._maybe_close_task_assets()
+
     def close(self) -> None:
-        self.supervisor.stop()
+        with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+
+        planner_drained = self.supervisor.stop()
+        if self.mcp_worker is not None:
+            self.mcp_worker.close()
+        function_drained = True
+        if self.function_worker is not None:
+            function_drained = self.function_worker.close()
+
+        with self._close_lock:
+            self._planner_drained = planner_drained
+            self._function_drained = function_drained
+
+        if planner_drained:
+            self._close_task_runtime_once()
+        else:
+            self.supervisor.when_planner_drained(self._planner_did_drain)
+
         self.observation_service.close()
-        if self.task_assets is not None:
-            self.task_assets.close()
+
+        if not function_drained and self.function_worker is not None:
+            self.function_worker.when_drained(self._function_did_drain)
+        self._maybe_close_task_assets()
 
 
 

@@ -245,6 +245,8 @@ class ImageOpsContractTests(ImageOpsFixture):
         self.assertEqual(inspect.adapter.execution_profile.verification_mode, "IMAGE_SOURCE_READBACK")
         self.assertEqual(transform.adapter.execution_profile.verification_mode, "IMAGE_ARTIFACT_READBACK")
         self.assertEqual(transform.adapter.execution_profile.idempotency_mode, "EXACT_INPUT")
+        self.assertEqual(transform.adapter.execution_profile.reconciliation_mode, "REPLAY_SAME_ATTEMPT")
+        self.assertTrue(transform.adapter.replay_safe)
         self.assertIn("exact_byte_budget_compression", self.health["unsupported"])
         self.assertIn("raw_development", self.health["unsupported"])
 

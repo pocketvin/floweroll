@@ -28,8 +28,20 @@ from floweroll_host.task_runtime import TaskRuntime
 
 def add_spec(registry, name, description="测试只读能力", *, loading="always_visible", read_only=True):
     spec = CapabilitySpec(name, description, {"type":"object","properties":{"query":{"type":"string"}},"required":[],"additionalProperties":False})
-    registry.register(RegisteredCapability(spec, FunctionToolAdapter(capability_id=name,source_kind="host_local",read_only=read_only),
-        CapabilitySourceTarget("host_local",metadata={"secret":"DO_NOT_EXPOSE_PRIVATE_METADATA","read_only":read_only}),loading=loading))
+    registry.register(RegisteredCapability(
+        spec,
+        FunctionToolAdapter(
+            capability_id=name,
+            source_kind="host_local",
+            read_only=read_only,
+            replay_safe=not read_only,
+        ),
+        CapabilitySourceTarget(
+            "host_local",
+            metadata={"secret":"DO_NOT_EXPOSE_PRIVATE_METADATA","read_only":read_only},
+        ),
+        loading=loading,
+    ))
     return spec
 
 

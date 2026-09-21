@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
+import threading
 import time
 from typing import Any, Callable, Dict, List, Mapping, Optional, Union
 
@@ -40,25 +41,128 @@ class FunctionExecutionWorker:
         self.registry = registry
         self.executors = dict(executors)
         self.max_workers = max_workers
+        self._pool = ThreadPoolExecutor(
+            max_workers=max_workers,
+            thread_name_prefix="floweroll-function",
+        )
+        self._futures: Dict[str, Future] = {}
+        self._futures_lock = threading.Lock()
+        self._completion_callback: Optional[Callable[[], None]] = None
+        self._closed = False
 
     def sweep_once(self) -> List[Dict[str, Any]]:
-        capability_ids = sorted(self.executors)
-        if not capability_ids:
-            return []
-        task_ids = self.execution.storage.open_action_task_ids(capability_ids)
-        if not task_ids:
-            return []
+        """Harvest finished work and admit new independent Tasks without blocking.
+
+        A function can have its own bounded network/process timeout, but Python
+        cannot safely preempt an arbitrary in-process callable after it may have
+        crossed a side-effect boundary. Keep one Future per Task instead: a
+        slow callable occupies only its worker slot and never causes this sweep
+        to wait for every other Function Action.
+        """
         results: List[Dict[str, Any]] = []
-        with ThreadPoolExecutor(
-            max_workers=min(self.max_workers, len(task_ids)),
-            thread_name_prefix="floweroll-function",
-        ) as pool:
-            futures = {pool.submit(self.run_once, task_id): task_id for task_id in task_ids}
-            for future in as_completed(futures):
+        errors: List[Exception] = []
+        failed_task_ids: set[str] = set()
+        with self._futures_lock:
+            finished = [
+                (task_id, future)
+                for task_id, future in self._futures.items()
+                if future.done()
+            ]
+            for task_id, _ in finished:
+                self._futures.pop(task_id, None)
+
+        for task_id, future in finished:
+            try:
                 value = future.result()
                 if value is not None:
                     results.append(value)
+            except Exception as exc:
+                failed_task_ids.add(task_id)
+                errors.append(exc)
+
+        capability_ids = sorted(self.executors)
+        if capability_ids:
+            task_ids = self.execution.storage.open_action_task_ids(capability_ids)
+            scheduled: List[Future] = []
+            with self._futures_lock:
+                if not self._closed:
+                    capacity = max(0, self.max_workers - len(self._futures))
+                    for task_id in task_ids:
+                        if capacity == 0:
+                            break
+                        if task_id in self._futures or task_id in failed_task_ids:
+                            continue
+                        future = self._pool.submit(self.run_once, task_id)
+                        self._futures[task_id] = future
+                        scheduled.append(future)
+                        capacity -= 1
+            for future in scheduled:
+                future.add_done_callback(self._did_finish_future)
+
+        if errors:
+            raise errors[0]
         return results
+
+    def set_completion_callback(self, callback: Optional[Callable[[], None]]) -> None:
+        """Wake an owning scheduler when an asynchronous Function run finishes."""
+        with self._futures_lock:
+            self._completion_callback = callback
+
+    def close(self, *, timeout_seconds: float = 0.5) -> bool:
+        first_close = False
+        with self._futures_lock:
+            if not self._closed:
+                self._closed = True
+                first_close = True
+            self._completion_callback = None
+            futures = tuple(self._futures.values())
+        # Queued work never crossed the function boundary and can be cancelled.
+        # Running callables are intentionally not force-killed: doing so cannot
+        # prove whether a side effect started. Their durable Attempt remains the
+        # source of truth until the callable returns or the Host process exits.
+        if first_close:
+            self._pool.shutdown(wait=False, cancel_futures=True)
+        if not futures:
+            return True
+        _, pending = wait(futures, timeout=max(0.0, float(timeout_seconds)))
+        return not pending
+
+    def when_drained(self, callback: Callable[[], None]) -> None:
+        """Run callback once every already-admitted Future has settled."""
+        with self._futures_lock:
+            pending = {future for future in self._futures.values() if not future.done()}
+        if not pending:
+            callback()
+            return
+
+        callback_lock = threading.Lock()
+        fired = False
+
+        def settled(future: Future) -> None:
+            nonlocal fired
+            should_fire = False
+            with callback_lock:
+                pending.discard(future)
+                if not pending and not fired:
+                    fired = True
+                    should_fire = True
+            if should_fire:
+                try:
+                    callback()
+                except Exception:
+                    pass
+
+        for future in tuple(pending):
+            future.add_done_callback(settled)
+
+    def _did_finish_future(self, _: Future) -> None:
+        with self._futures_lock:
+            callback = self._completion_callback
+        if callback is not None:
+            try:
+                callback()
+            except Exception:
+                pass
 
     def run_once(self, task_id: str) -> Optional[Dict[str, Any]]:
         action = self.execution.storage.get_open_action(task_id)

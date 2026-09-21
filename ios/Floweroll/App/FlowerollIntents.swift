@@ -190,9 +190,53 @@ struct HomeHouTaskIntent: AppIntent {
             throw error
         }
 
-        // BGCPT must be requested while this foreground user action is still
-        // executing. The exact outbox identity survives if AppIntent execution
-        // is suspended after this point.
+        // If the exact current Task already has a system-entry
+        // LongRunningIntent, join it instead of creating a second BGCPT/Live
+        // Activity owner. The mutation is durable first; if that system owner
+        // disappears during admission, reacquire BGCPT afterwards.
+        if case let .currentTask(taskID, _, _) = prepared.target,
+           await coordinator.hasActiveSystemExecution(taskID: taskID) {
+            do {
+                let route = try await coordinator.enqueuePreparedHomeInputWithoutNewExecutionWindow(
+                    prepared,
+                    submissionID: normalizedSubmissionID,
+                    attachments: attachments
+                )
+                let stillSystemOwned = await coordinator.hasActiveSystemExecution(taskID: route.taskID)
+                if !stillSystemOwned {
+                    if !attachments.isEmpty {
+                        _ = await DeviceBackgroundExecutionController.shared.beginUserInitiatedOutboxContinuation(
+                            submissionID: normalizedSubmissionID,
+                            summary: normalized
+                        )
+                    }
+                    _ = await DeviceBackgroundExecutionController.shared.submitUserInitiatedContinuation(
+                        taskID: route.taskID,
+                        goal: normalized
+                    )
+                }
+                await HomeInAppIntentEvents.postAccepted(
+                    submissionID: normalizedSubmissionID,
+                    taskID: route.taskID,
+                    attachmentIDs: attachments.map(\.id),
+                    joinedExistingExecution: stillSystemOwned
+                )
+                SystemEntryIntentDiagnostics.record(
+                    "home.perform.done",
+                    detail: "task=\(route.taskID) owner=\(stillSystemOwned ? "system-long-running" : "bgcpt-reacquired")"
+                )
+                return .result()
+            } catch {
+                await HomeInAppIntentEvents.postFailure(
+                    submissionID: normalizedSubmissionID,
+                    message: error.localizedDescription
+                )
+                throw error
+            }
+        }
+
+        // No system-entry owner exists for this Task. BGCPT must be requested
+        // while this foreground user action is still executing.
         _ = await DeviceBackgroundExecutionController.shared.beginUserInitiatedOutboxContinuation(
             submissionID: normalizedSubmissionID,
             summary: normalized
@@ -368,10 +412,47 @@ struct TaskScopedHouIntent: AppIntent {
             throw error
         }
 
-        // Existing task identity is already known, so foreground interaction can
-        // hand BGCPT the exact owner before the Host mutation starts. The Host
-        // still exposes the old needs-user snapshot for a short race window;
-        // reserve that Task until the exact mutation has been durably consumed.
+        let coordinator = SystemEntryRuntimeCoordinator.shared
+        if await coordinator.hasActiveSystemExecution(taskID: normalizedTaskID) {
+            do {
+                try await coordinator.performTaskScopedOperation(
+                    taskID: normalizedTaskID,
+                    eventID: normalizedEventID,
+                    operation: operation
+                )
+                let stillSystemOwned = await coordinator.hasActiveSystemExecution(
+                    taskID: normalizedTaskID
+                )
+                if !stillSystemOwned {
+                    _ = await DeviceBackgroundExecutionController.shared.submitUserInitiatedContinuation(
+                        taskID: normalizedTaskID,
+                        goal: ""
+                    )
+                }
+                await TaskScopedInAppIntentEvents.postAccepted(
+                    eventID: normalizedEventID,
+                    sourceTaskID: normalizedTaskID,
+                    taskID: normalizedTaskID
+                )
+                SystemEntryIntentDiagnostics.record(
+                    "task_scoped.perform.done",
+                    detail: "task=\(normalizedTaskID) owner=\(stillSystemOwned ? "system-long-running" : "bgcpt-reacquired")"
+                )
+                return .result()
+            } catch {
+                await TaskScopedInAppIntentEvents.postFailure(
+                    eventID: normalizedEventID,
+                    sourceTaskID: normalizedTaskID,
+                    message: error.localizedDescription
+                )
+                throw error
+            }
+        }
+
+        // No system LongRunning owner exists. Hand BGCPT the exact task before
+        // the Host mutation starts. The Host can still expose the old
+        // needs-user snapshot for a short race window, so reserve the Task until
+        // the exact mutation has been durably consumed.
         await DeviceBackgroundExecutionController.shared.beginTaskScopedMutationReservation(
             taskID: normalizedTaskID
         )
@@ -380,7 +461,7 @@ struct TaskScopedHouIntent: AppIntent {
             goal: ""
         )
         do {
-            try await SystemEntryRuntimeCoordinator.shared.performTaskScopedOperation(
+            try await coordinator.performTaskScopedOperation(
                 taskID: normalizedTaskID,
                 eventID: normalizedEventID,
                 operation: operation

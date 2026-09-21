@@ -770,19 +770,240 @@ final class MaterialAttachmentStabilityTests: XCTestCase {
         let marker = "recovered-draft-\(UUID().uuidString)"
         try draft.add(data: Data(marker.utf8), name: marker + ".txt", mediaType: "text/plain")
         let item = try XCTUnwrap(draft.items.last(where: { $0.name == marker + ".txt" }))
-        let localURL = try item.fileURL()
+        let durableURL = try item.fileURL()
+        let cacheURL = try item.acceptedCacheURL()
         defer {
             draft.discard([item.id])
-            try? FileManager.default.removeItem(at: localURL)
+            try? FileManager.default.removeItem(at: durableURL)
+            try? FileManager.default.removeItem(at: cacheURL)
         }
 
         TaskAttachmentDraft.clearAcceptedReferences([item.id])
 
         XCTAssertFalse(draft.items.contains(where: { $0.id == item.id }))
-        XCTAssertTrue(
-            FileManager.default.fileExists(atPath: localURL.path),
-            "accepted message thumbnail bytes stay local even after composer reference clears"
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: durableURL.path),
+            "accepted bytes are no longer durable outbox state"
         )
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: cacheURL.path),
+            "accepted message thumbnail bytes stay available as a recreatable cache"
+        )
+
+        let file = TaskMaterialFile(
+            id: item.id,
+            name: item.name,
+            mediaType: item.mediaType,
+            sizeBytes: item.sizeBytes,
+            sha256: item.sha256,
+            category: "input",
+            metadata: [:]
+        )
+        XCTAssertEqual(file.verifiedLocalInputURL, cacheURL)
+        XCTAssertEqual(try Data(contentsOf: try XCTUnwrap(file.verifiedLocalInputURL)), Data(marker.utf8))
+    }
+
+    func testAttachmentCacheMigrationProtectsActiveOutboxIdentity() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("attachment-cache-migration-\(UUID().uuidString)", isDirectory: true)
+        let durable = root.appendingPathComponent("durable", isDirectory: true)
+        let cache = root.appendingPathComponent("cache", isDirectory: true)
+        try FileManager.default.createDirectory(at: durable, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let protectedID = UUID().uuidString
+        let acceptedID = UUID().uuidString
+        let protectedURL = durable.appendingPathComponent(protectedID + ".txt")
+        let acceptedURL = durable.appendingPathComponent(acceptedID + ".txt")
+        try Data("pending".utf8).write(to: protectedURL)
+        try Data("accepted".utf8).write(to: acceptedURL)
+
+        PendingAttachment.moveUnreferencedDurableBytesToCache(
+            protectedIDs: [protectedID],
+            sourceDirectory: durable,
+            cacheDirectory: cache
+        )
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: protectedURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: acceptedURL.path))
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: cache.appendingPathComponent(acceptedID + ".txt").path
+            )
+        )
+    }
+
+    func testAttachmentCacheMigrationFailsClosedWhenComposerLedgerIsCorrupt() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("attachment-ledger-corrupt-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("{not-json".utf8).write(
+            to: root.appendingPathComponent("composer-draft.json"),
+            options: .atomic
+        )
+
+        XCTAssertThrowsError(
+            try TaskAttachmentDraft.persistedAttachmentIDsForMigration(directory: root)
+        )
+    }
+
+    func testAttachmentCacheMigrationTreatsMissingComposerLedgerAsEmpty() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("attachment-ledger-missing-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        XCTAssertEqual(
+            try TaskAttachmentDraft.persistedAttachmentIDsForMigration(directory: root),
+            []
+        )
+    }
+
+    func testRuntimeStoreMigrationRequiresHealthyPendingStoreOwner() throws {
+        let sourceURL = try ProductSourceFiles.iosRoot()
+            .appendingPathComponent("Floweroll/App/RuntimeClient/RuntimeTaskStore.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let migration = try XCTUnwrap(source.range(of: "private func migrateAcceptedAttachmentBytesToCache() async"))
+        let tail = String(source[migration.lowerBound...].prefix(1800))
+        XCTAssertTrue(tail.contains("guard let pendingStore else { return }"))
+        XCTAssertTrue(tail.contains("persistedAttachmentIDsForMigration()"))
+
+        let draftURL = try ProductSourceFiles.iosRoot()
+            .appendingPathComponent("Floweroll/App/RuntimeClient/Materials/Attachments/TaskAttachmentDraft.swift")
+        let draftSource = try String(contentsOf: draftURL, encoding: .utf8)
+        let readStart = try XCTUnwrap(
+            draftSource.range(of: "nonisolated static func persistedAttachmentIDsForMigration(")
+        )
+        let readEnd = try XCTUnwrap(
+            draftSource.range(of: "private func persist()", range: readStart.upperBound..<draftSource.endIndex)
+        )
+        let readScope = String(draftSource[readStart.lowerBound..<readEnd.lowerBound])
+        XCTAssertFalse(readScope.contains("currentInstance"), "cache migration must trust durable ledger bytes, not the UI draft")
+    }
+
+    func testPendingStoreReportsEveryAttachmentIdentityThatMustStayDurable() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pending-attachment-protection-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try PendingSubmissionStore(directoryURL: directory)
+        let first = PendingAttachment(
+            id: "pending-submission-file", name: "a.txt", mediaType: "text/plain",
+            sizeBytes: 1, sha256: String(repeating: "a", count: 64), storedName: "a.txt"
+        )
+        let second = PendingAttachment(
+            id: "pending-turn-file", name: "b.txt", mediaType: "text/plain",
+            sizeBytes: 1, sha256: String(repeating: "b", count: 64), storedName: "b.txt"
+        )
+        _ = try await store.create(
+            text: "new task", invocationSource: "test", attachments: [first], submissionID: "submission"
+        )
+        _ = try await store.createUserTurn(
+            taskID: "task", text: "follow up", attachments: [second], eventID: "event"
+        )
+
+        let protectedIDs = await store.attachmentIDsInUse()
+        XCTAssertEqual(
+            protectedIDs,
+            Set(["pending-submission-file", "pending-turn-file"])
+        )
+    }
+
+    func testPendingStoreCreatePersistenceFailureDoesNotLeaveInMemoryPhantom() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pending-create-write-failure-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let store = try PendingSubmissionStore(directoryURL: directory)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+
+        do {
+            _ = try await store.create(
+                text: "不应留在内存",
+                invocationSource: "test",
+                submissionID: "phantom-submission"
+            )
+            XCTFail("unwritable outbox must reject create")
+        } catch {}
+
+        let pendingAfterCreateFailure = await store.pending()
+        let canReplayAfterCreateFailure = await store.canReplaySubmission(submissionID: "phantom-submission")
+        XCTAssertTrue(pendingAfterCreateFailure.isEmpty)
+        XCTAssertFalse(canReplayAfterCreateFailure)
+    }
+
+    func testPendingStoreAcceptedPersistenceFailureKeepsPendingReplayTruth() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pending-accept-write-failure-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let store = try PendingSubmissionStore(directoryURL: directory)
+        _ = try await store.create(text: "必须继续可恢复", invocationSource: "test", submissionID: "accept-failure")
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+
+        do {
+            try await store.markAccepted(submissionID: "accept-failure")
+            XCTFail("unwritable outbox must reject acceptance mutation")
+        } catch {}
+
+        let pendingAfterAcceptFailure = await store.pending()
+        let canReplayAfterAcceptFailure = await store.canReplaySubmission(submissionID: "accept-failure")
+        XCTAssertEqual(pendingAfterAcceptFailure.map(\.submissionID), ["accept-failure"])
+        XCTAssertTrue(canReplayAfterAcceptFailure)
+    }
+
+    func testPendingStoreDiscardPersistenceFailureKeepsPendingReplayTruth() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pending-discard-write-failure-\(UUID().uuidString)", isDirectory: true)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let store = try PendingSubmissionStore(directoryURL: directory)
+        _ = try await store.create(text: "删除失败不能遗忘", invocationSource: "test", submissionID: "discard-failure")
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+
+        do {
+            _ = try await store.discard(submissionID: "discard-failure")
+            XCTFail("unwritable outbox must reject discard mutation")
+        } catch {}
+
+        let pendingAfterDiscardFailure = await store.pending()
+        let canReplayAfterDiscardFailure = await store.canReplaySubmission(submissionID: "discard-failure")
+        XCTAssertEqual(pendingAfterDiscardFailure.map(\.submissionID), ["discard-failure"])
+        XCTAssertTrue(canReplayAfterDiscardFailure)
+    }
+
+    func testPendingUserTurnPersistenceFailureDoesNotMutateActorTruth() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pending-turn-write-failure-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let store = try PendingSubmissionStore(directoryURL: directory)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: directory.path)
+
+        do {
+            _ = try await store.createUserTurn(
+                taskID: "task",
+                text: "不应产生 phantom turn",
+                eventID: "phantom-turn"
+            )
+            XCTFail("unwritable outbox must reject user-turn create")
+        } catch {}
+
+        let pendingTurnsAfterFailure = await store.pendingUserTurns()
+        let canReplayTurnAfterFailure = await store.canReplayUserTurn(eventID: "phantom-turn")
+        XCTAssertTrue(pendingTurnsAfterFailure.isEmpty)
+        XCTAssertFalse(canReplayTurnAfterFailure)
     }
 
     func testSameContentCreatesIndependentSubmissionIdentities() async throws {
@@ -1754,5 +1975,85 @@ final class MaterialAttachmentStabilityTests: XCTestCase {
             "created_at": "2026-09-12T08:00:00Z",
             "updated_at": "2026-09-12T08:00:00Z",
         ])
+    }
+}
+
+
+extension MaterialAttachmentStabilityTests {
+    func testVerifiedRemoteReceiptAdmitsOutboxWithoutReopeningLocalBytes() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pendingStore = try PendingSubmissionStore(directoryURL: directory)
+        let attachment = PendingAttachment(id: UUID().uuidString, name: "已上传.txt", mediaType: "text/plain",
+            sizeBytes: 42, sha256: String(repeating: "a", count: 64), storedName: "missing-\(UUID().uuidString).txt")
+        let pending = try await pendingStore.create(text: "读取已上传的附件", invocationSource: "ios_home_in_app",
+                                                   attachments: [attachment], submissionID: "receipt-only")
+        let state = MaterialMockState()
+        MaterialURLProtocol.handler = { request in
+            if request.url?.path == "/v1/files/\(attachment.id)" {
+                return MaterialMockResponse(200, Self.receiptJSON(attachment))
+            }
+            if request.url?.path == "/v1/tasks", request.httpMethod == "POST" {
+                state.withLock { state.taskPostCount += 1 }
+                let body = try JSONSerialization.jsonObject(with: Self.requestBody(request)) as! [String: Any]
+                XCTAssertEqual(body["submission_id"] as? String, pending.submissionID)
+                return MaterialMockResponse(201, try Self.taskJSON(submissionID: pending.submissionID))
+            }
+            XCTFail("Unexpected transfer/recovery request: \(request.url?.path ?? "")")
+            return MaterialMockResponse(500)
+        }
+        let client = FlowerollHostClient(baseURL: URL(string: "https://host.example")!,
+                                         session: makeSession(), bearerToken: "test-only-token")
+        let task = try await client.submitExisting(pending, pendingStore: pendingStore)
+        XCTAssertEqual(task.submissionID, "receipt-only")
+        XCTAssertEqual(state.withLock { state.taskPostCount }, 1)
+        let remaining = await pendingStore.pending()
+        XCTAssertTrue(remaining.isEmpty)
+    }
+
+    func testMismatchedRemoteReceiptCannotAdmitMissingLocalAttachment() async throws {
+        let attachment = PendingAttachment(id: UUID().uuidString, name: "附件.txt", mediaType: "text/plain",
+            sizeBytes: 42, sha256: String(repeating: "a", count: 64), storedName: "missing-\(UUID().uuidString).txt")
+        MaterialURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/v1/files/\(attachment.id)")
+            var body = try JSONSerialization.jsonObject(with: Self.receiptJSON(attachment)) as! [String: Any]
+            body["sha256"] = String(repeating: "b", count: 64)
+            return MaterialMockResponse(200, try JSONSerialization.data(withJSONObject: body))
+        }
+        let client = FlowerollHostClient(baseURL: URL(string: "http://localhost")!, session: makeSession())
+        do {
+            _ = try await client.uploadTaskAttachment(attachment)
+            XCTFail("Mismatched hash must fail closed")
+        } catch { XCTAssertFalse(error is CancellationError) }
+    }
+
+    @MainActor
+    func testForegroundReceiptRecoverySkipsUnfinishedBytesButAdmitsReadySibling() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pending = try PendingSubmissionStore(directoryURL: directory)
+        let missing = PendingAttachment(id: "unfinished", name: "等待.txt", mediaType: "text/plain", sizeBytes: 42,
+            sha256: String(repeating: "a", count: 64), storedName: "missing-\(UUID().uuidString).txt")
+        _ = try await pending.create(text: "上传未完成", invocationSource: "test", attachments: [missing], submissionID: "slow")
+        _ = try await pending.create(text: "文本可以继续", invocationSource: "test", submissionID: "ready")
+        let suite = "foreground-receipt-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("http://localhost", forKey: RuntimeTaskStore.endpointDefaultsKey)
+        MaterialURLProtocol.handler = { request in
+            if request.url?.path == "/v1/files/unfinished" { return MaterialMockResponse(404) }
+            if request.url?.path == "/v1/tasks", request.httpMethod == "POST" {
+                let body = try JSONSerialization.jsonObject(with: Self.requestBody(request)) as! [String: Any]
+                XCTAssertEqual(body["submission_id"] as? String, "ready")
+                return MaterialMockResponse(201, try Self.taskJSON(submissionID: "ready"))
+            }
+            XCTFail("A receipt-only lifecycle pass must not wait for/enqueue file bytes")
+            return MaterialMockResponse(500)
+        }
+        let store = RuntimeTaskStore(defaults: defaults, session: makeSession(), pendingStore: pending, deviceWorker: nil)
+        await store.retryPendingSubmissions(onlyVerifiedAttachments: true)
+        let remaining = await pending.pending()
+        XCTAssertEqual(remaining.map(\.submissionID), ["slow"])
+        XCTAssertTrue(store.allKnownTasks.contains { $0.submissionID == "ready" })
     }
 }

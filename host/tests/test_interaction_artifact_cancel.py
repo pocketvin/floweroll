@@ -347,6 +347,10 @@ class CancellationTests(unittest.TestCase):
         )
         self.assertEqual(result["status"], "cancelled")
         self.assertEqual(len(store.action_attempts(dispatch["action_id"])), 1)
+        self.assertEqual(
+            store.get_action_attempt(dispatch["attempt_id"])["latest_outcome"],
+            "CANCELLED",
+        )
         self.assertIsNone(loop.next_action(task["task_id"]))
 
 

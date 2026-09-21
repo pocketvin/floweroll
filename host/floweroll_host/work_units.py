@@ -227,7 +227,7 @@ class WorkUnitStore:
     def model_evidence(self, task_id):
         """Keep full receipts on disk; only a bounded working set reaches Kimi."""
         from .planner_compaction import project_evidence
-        selected, remaining = [], 24000
+        selected, remaining = [], 16000
         for row in reversed(project_evidence(self.evidence(task_id)[-12:])):
             body = encoded(row['data'])
             if len(body) > 12000:
@@ -556,8 +556,14 @@ def register_work_units(registry, assets, executors, mcp_drivers=None):
             "retry_failed": {"type": "boolean"}}, "required": ["units"], "additionalProperties": False},
         post_verify_mode="REPLAN_REQUIRED")
     registry.register(RegisteredCapability(spec=spec,
-        adapter=FunctionToolAdapter(capability_id=BATCH_ID, source_kind="host_internal", read_only=False,
-                                    timeout_seconds=1800, max_attempts=3),
+        adapter=FunctionToolAdapter(
+            capability_id=BATCH_ID,
+            source_kind="host_internal",
+            read_only=False,
+            replay_safe=True,
+            timeout_seconds=1800,
+            max_attempts=3,
+        ),
         source=CapabilitySourceTarget(kind="host_internal", tool_name=BATCH_ID,
             metadata={"effect": "bounded_safe_work", "foreground_policy": "background_only"}),
         tags=("task", "parallel", "document", "并行", "工作项"), loading="always_visible"))

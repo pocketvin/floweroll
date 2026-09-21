@@ -4,13 +4,11 @@ from dataclasses import asdict, dataclass
 from typing import Any, Dict, Optional, Protocol
 
 
-EXECUTION_OUTCOMES = {
+EXECUTION_VERIFICATION_OUTCOMES = {
     "SUCCESS",
     "MODEL_CORRECTABLE_FAILURE",
     "TRANSIENT_FAILURE",
     "TERMINAL_FAILURE",
-    "UNKNOWN",
-    "INPUT_REQUIRED",
     "CANCELLED",
 }
 
@@ -37,8 +35,8 @@ class ExecutionVerification:
     direct_completion_summary: Optional[str] = None
 
     def __post_init__(self) -> None:
-        if self.outcome not in EXECUTION_OUTCOMES:
-            raise ValueError(f"invalid execution outcome: {self.outcome}")
+        if self.outcome not in EXECUTION_VERIFICATION_OUTCOMES:
+            raise ValueError(f"invalid execution verification outcome: {self.outcome}")
 
 
 class CapabilityAdapter(Protocol):

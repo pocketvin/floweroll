@@ -1369,15 +1369,4 @@ struct HomeView: View {
             await runtimeStore.discardPendingSubmission(submissionID: submissionID)
         }
     }
-
-    private func homeStatusColor(_ task: HostTaskIndexItem) -> Color {
-        if task.needsUser { return .orange }
-        switch task.status.lowercased() {
-        case "completed": return .green
-        case "failed": return .red
-        case "cancelled": return .secondary
-        case "waiting", "blocked": return .orange
-        default: return themePalette.accent
-        }
-    }
 }

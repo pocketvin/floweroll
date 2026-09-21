@@ -266,6 +266,11 @@ actor ScheduleHubRemovalCoordinator {
                 _ = try await journal.markDefinitelyNotStarted(attemptID: dispatch.attemptID)
                 return .failed("上一次移除已确认没有开始。请刷新后再试。")
 
+            case .resumeAuthorizedOperation:
+                // A settings deletion cannot take over another capability's
+                // partly executed transaction or silently repeat a deletion.
+                return .needsReconciliation("移除结果需要核对；不会自动再次删除。")
+
             case let .stillUnknown(reason):
                 return .needsReconciliation(
                     reason ?? "移除结果暂时无法确认；小卷不会自动再次删除。"

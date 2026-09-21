@@ -65,14 +65,25 @@ final class BackgroundAttachmentUploadTests: XCTestCase {
             operation: .chunk,
             offset: 256,
             recoveryCount: 2,
-            bodyFileName: "chunk.body"
+            bodyFileName: "chunk.body",
+            laneID: "lane-one"
         )
         let encoded = try job.encodedDescription()
         XCTAssertEqual(BackgroundAttachmentUploadJob.decode(encoded), job)
         XCTAssertTrue(encoded.contains("background-upload-id"))
+        XCTAssertTrue(encoded.contains("lane-one"))
         XCTAssertFalse(encoded.lowercased().contains("authorization"))
         XCTAssertFalse(encoded.lowercased().contains("bearer"))
         XCTAssertFalse(encoded.contains("secret-token"))
+
+        var legacyObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [String: Any]
+        )
+        legacyObject.removeValue(forKey: "laneID")
+        let legacyData = try JSONSerialization.data(withJSONObject: legacyObject)
+        let legacyDescription = try XCTUnwrap(String(data: legacyData, encoding: .utf8))
+        let legacyJob = try XCTUnwrap(BackgroundAttachmentUploadJob.decode(legacyDescription))
+        XCTAssertNil(legacyJob.laneID, "installed tasks from builds before lane fencing must remain decodable")
     }
 
     private func progressJob(operation: BackgroundAttachmentUploadJob.Operation = .chunk, offset: Int = 256) -> BackgroundAttachmentUploadJob {
@@ -120,6 +131,69 @@ final class BackgroundAttachmentUploadTests: XCTestCase {
         XCTAssertTrue(store.contains("AttachmentBackgroundUploadTransport.shared.refreshProgress()"))
     }
 
+    func testImmediateUploadLaneBlocksBackgroundUntilLastOwnerReleases() throws {
+        var state = BackgroundAttachmentUploadLaneState()
+        let oldLane = try XCTUnwrap(state.beginBackground(attachmentID: "shared"))
+        XCTAssertTrue(
+            state.isCurrentBackgroundLane(attachmentID: "shared", laneID: oldLane)
+        )
+
+        state.beginImmediate(attachmentID: "shared")
+        state.beginImmediate(attachmentID: "shared")
+        XCTAssertEqual(state.immediateOwnerCount(attachmentID: "shared"), 2)
+        XCTAssertFalse(
+            state.isCurrentBackgroundLane(attachmentID: "shared", laneID: oldLane)
+        )
+        XCTAssertNil(
+            state.adoptBackgroundJob(attachmentID: "shared", laneID: oldLane),
+            "handoff-retired callbacks must never resurrect their background lane"
+        )
+
+        state.endImmediate(attachmentID: "shared")
+        XCTAssertNil(state.beginBackground(attachmentID: "shared"))
+        state.endImmediate(attachmentID: "shared")
+
+        let freshLane = try XCTUnwrap(state.beginBackground(attachmentID: "shared"))
+        XCTAssertNotEqual(freshLane, oldLane)
+        XCTAssertEqual(
+            state.prepareDiscoveredExistingTask(
+                attachmentID: "shared",
+                provisionalLaneID: freshLane,
+                existingLaneID: oldLane,
+                replaceExisting: false
+            ),
+            .replaceStale(laneID: freshLane)
+        )
+
+        let completedDisposition = state.prepareDiscoveredExistingTask(
+            attachmentID: "shared",
+            provisionalLaneID: freshLane,
+            existingLaneID: freshLane,
+            replaceExisting: true
+        )
+        guard case let .replaceStale(replacementLane) = completedDisposition else {
+            return XCTFail("completed system task must be detached from the fresh transfer lane")
+        }
+        XCTAssertNotEqual(replacementLane, freshLane)
+        XCTAssertFalse(
+            state.isCurrentBackgroundLane(attachmentID: "shared", laneID: freshLane)
+        )
+        XCTAssertTrue(
+            state.finishBackground(attachmentID: "shared", laneID: replacementLane)
+        )
+        XCTAssertFalse(
+            state.isCurrentBackgroundLane(attachmentID: "shared", laneID: replacementLane)
+        )
+
+        var cancelState = BackgroundAttachmentUploadLaneState()
+        let cancelledLane = try XCTUnwrap(cancelState.beginBackground(attachmentID: "cancelled"))
+        cancelState.beginImmediate(attachmentID: "cancelled")
+        cancelState.endImmediate(attachmentID: "cancelled")
+        XCTAssertNil(
+            cancelState.adoptBackgroundJob(attachmentID: "cancelled", laneID: cancelledLane)
+        )
+    }
+
     func testBackgroundTransferOwnsBytesButNotZeroByteControlPlane() throws {
         let appRoot = try ProductSourceFiles.iosRoot().appendingPathComponent("Floweroll/App/RuntimeClient")
         let client = try String(contentsOf: appRoot.appendingPathComponent("FlowerollHostClient.swift"), encoding: .utf8)
@@ -157,9 +231,42 @@ final class BackgroundAttachmentUploadTests: XCTestCase {
         let admit = try XCTUnwrap(tail.range(of: "client.submitExisting(pending"))
         XCTAssertLessThan(persisted.lowerBound, immediate.lowerBound)
         XCTAssertLessThan(immediate.lowerBound, admit.lowerBound)
-        XCTAssertTrue(client.contains("handoffToImmediateUpload("))
+        XCTAssertTrue(client.contains("beginImmediateUploadHandoff("))
+        XCTAssertTrue(client.contains("endImmediateUploadHandoff(attachmentID: attachment.id)"))
+        XCTAssertTrue(client.contains("defer {"))
+        XCTAssertTrue(transport.contains("laneState.beginBackground(attachmentID: attachment.id)"))
+        XCTAssertTrue(transport.contains("laneState.prepareDiscoveredExistingTask("))
+        XCTAssertTrue(transport.contains("replaceExisting: existingDisposition == .replace"))
+        XCTAssertTrue(transport.contains("laneState.finishBackground(attachmentID: attachmentID, laneID: laneID)"))
+        XCTAssertTrue(transport.contains("laneState.isCurrentBackgroundLane("))
+        XCTAssertTrue(transport.contains("let values = claimImmediateUploadOwnership(attachmentID: attachmentID)"))
+        XCTAssertTrue(transport.contains("defer { self.endImmediateUploadHandoff(attachmentID: attachmentID) }"))
         XCTAssertTrue(transport.contains("task.taskDescription = nil"))
         XCTAssertTrue(transport.contains("task.cancel()"))
+    }
+
+    func testHomeExistingSystemOwnerAttachmentTurnUsesImmediateUploadBeforeAdmission() throws {
+        let root = try ProductSourceFiles.iosRoot().appendingPathComponent("Floweroll/App/RuntimeClient")
+        let coordinator = try String(
+            contentsOf: root.appendingPathComponent("SystemEntryRuntimeCoordinator.swift"),
+            encoding: .utf8
+        )
+        let start = try XCTUnwrap(
+            coordinator.range(of: "func enqueuePreparedHomeInputWithoutNewExecutionWindow(")
+        )
+        let end = try XCTUnwrap(
+            coordinator.range(of: "private func submitHomeTask(", range: start.upperBound..<coordinator.endIndex)
+        )
+        let scope = String(coordinator[start.lowerBound..<end.lowerBound])
+
+        let persisted = try XCTUnwrap(scope.range(of: "pendingStore.createUserTurn("))
+        let recovery = try XCTUnwrap(scope.range(of: "home_joined_existing_user_turn_persisted"))
+        let immediate = try XCTUnwrap(scope.range(of: "executionMode: .immediateResumable"))
+        let admitted = try XCTUnwrap(scope.range(of: "client.submitExistingUserTurn(pending"))
+        XCTAssertLessThan(persisted.lowerBound, recovery.lowerBound)
+        XCTAssertLessThan(recovery.lowerBound, immediate.lowerBound)
+        XCTAssertLessThan(immediate.lowerBound, admitted.lowerBound)
+        XCTAssertFalse(scope.contains("Task { try? await client.uploadTaskAttachment(attachment) }"))
     }
 
     func testProductSourceUsesBackgroundFileUploadWithoutBGCPT() throws {

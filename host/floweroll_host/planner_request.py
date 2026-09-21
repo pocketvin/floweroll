@@ -33,6 +33,23 @@ def _planner_guidance(context: DecisionContext) -> list[str]:
             "progress, WAIT with kind=user_input."
         )
 
+    predispatch_confirmation = runtime_context.get("predispatch_confirmation_capabilities")
+    if isinstance(predispatch_confirmation, list) and predispatch_confirmation:
+        capability_ids = [
+            str(item) for item in predispatch_confirmation
+            if isinstance(item, str) and item.strip()
+        ]
+        if capability_ids:
+            guidance.append(
+                "Runtime-bound confirmation owns approval for these visible capabilities: "
+                + ", ".join(capability_ids[:12])
+                + ". Do not CLARIFY merely to ask whether the user approves one of these actions. "
+                "Once exact current target/state arguments are available from verified evidence, "
+                "EXECUTE the semantic Action. ExecutionRuntime will pause before any Attempt and "
+                "create an exact, binding-aware ACTION_INPUT. If the user asked to be confirmed "
+                "before a destructive change, that ACTION_INPUT is the confirmation surface."
+            )
+
     failure = context.last_semantic_failure if isinstance(context.last_semantic_failure, dict) else None
     if failure:
         kind = str(failure.get("kind") or "")

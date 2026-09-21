@@ -215,6 +215,61 @@ class TaskAssetsTests(unittest.TestCase):
                       [{'id':'a','title':'A'},{'id':'a','title':'B'}]):
             with self.assertRaises(ValueError): self.assets.save_plan('one','计划',items)
 
+    def test_same_plan_replay_is_idempotent_without_moving_timestamp(self):
+        self.assets.save_plan(
+            'one',
+            '面试准备',
+            [{'id':'resume','title':'扫描PDF','depends_on':[]}],
+        )
+        before = self.assets.db.execute(
+            "SELECT updated_at FROM plans WHERE task_id=?",
+            ('one',),
+        ).fetchone()['updated_at']
+        replay = self.assets.save_plan(
+            'one',
+            '面试准备',
+            [{'id':'resume','title':'扫描PDF','depends_on':[]}],
+        )
+        after = self.assets.db.execute(
+            "SELECT updated_at FROM plans WHERE task_id=?",
+            ('one',),
+        ).fetchone()['updated_at']
+        self.assertTrue(replay['idempotent_replay'])
+        self.assertEqual(after, before)
+
+    def test_publish_bytes_same_action_replay_requires_identical_artifact(self):
+        first = self.assets.publish_bytes(
+            task_id='one',
+            action_id='action-replay',
+            name='结果.md',
+            media_type='text/markdown',
+            data=b'first',
+            category='report',
+            metadata={'kind':'general'},
+        )
+        replay = self.assets.publish_bytes(
+            task_id='one',
+            action_id='action-replay',
+            name='结果.md',
+            media_type='text/markdown',
+            data=b'first',
+            category='report',
+            metadata={'kind':'general'},
+        )
+        self.assertEqual(replay['id'], first['id'])
+        self.assertEqual(replay['sha256'], first['sha256'])
+
+        with self.assertRaisesRegex(ValueError, '输出重放与已保存成果不一致'):
+            self.assets.publish_bytes(
+                task_id='one',
+                action_id='action-replay',
+                name='结果.md',
+                media_type='text/markdown',
+                data=b'different',
+                category='report',
+                metadata={'kind':'general'},
+            )
+
     def test_plan_accepts_real_dependencies(self):
         result=self.assets.save_plan('one','面试准备',[{'id':'resume','title':'扫描PDF'},
             {'id':'study','title':'学习计划','depends_on':['resume']}])

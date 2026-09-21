@@ -188,15 +188,20 @@ private struct HomeFocusedTaskStage: View {
         }
     }
 
+    private var presentationTruth: RuntimeTaskPresentationTruth {
+        model.view?.presentationTruth ?? task.presentationTruth
+    }
+
     private var mascotState: FlowerollStateAsset? {
-        if task.needsUser { return .waiting }
-        if let view = model.view {
-            if view.typedPendingInteraction != nil { return .waiting }
-            switch view.task.status.lowercased() {
-            case "completed": return .done
-            case "failed", "cancelled": return nil
-            case "waiting", "blocked": return .waiting
-            default:
+        switch presentationTruth.state {
+        case .completed:
+            return .done
+        case .failed, .cancelled:
+            return nil
+        case .waiting, .paused, .needsUser:
+            return .waiting
+        case .active:
+            if let view = model.view {
                 if let active = view.timeline.last(where: {
                     $0.isUserVisible && $0.presentationState.uppercased() == "ACTIVE"
                 }) {
@@ -204,36 +209,26 @@ private struct HomeFocusedTaskStage: View {
                 }
                 return view.timeline.isEmpty ? .thinking : .working
             }
-        }
-        switch task.status.lowercased() {
-        case "failed", "cancelled": return nil
-        case "completed": return .done
-        case "waiting", "blocked": return .waiting
-        default:
             return task.latestTimeline == nil ? .thinking : .working
         }
     }
 
     private var statusLabel: String {
-        if task.needsUser { return "需要你" }
-        switch task.status.lowercased() {
-        case "completed": return "已完成"
-        case "failed": return "失败"
-        case "cancelled": return "已取消"
-        case "waiting": return "等待中"
-        case "blocked": return "已暂停"
-        default: return "正在处理"
-        }
+        presentationTruth.statusLabel
     }
 
     private var statusColor: Color {
-        if task.needsUser { return .orange }
-        switch task.status.lowercased() {
-        case "completed": return .green
-        case "failed": return .red
-        case "cancelled": return .secondary
-        case "waiting", "blocked": return .orange
-        default: return themePalette.accent
+        switch presentationTruth.state {
+        case .completed:
+            return .green
+        case .failed:
+            return .red
+        case .cancelled:
+            return .secondary
+        case .waiting, .paused, .needsUser:
+            return .orange
+        case .active:
+            return themePalette.accent
         }
     }
 

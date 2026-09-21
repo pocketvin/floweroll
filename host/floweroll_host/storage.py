@@ -21,6 +21,23 @@ from .presentation import (
 from .read_models import decode_task_cursor, encode_task_cursor
 
 
+_TASK_STATUSES = frozenset({
+    "active",
+    "waiting",
+    "blocked",
+    "completed",
+    "failed",
+    "cancelled",
+})
+
+
+def _task_status_for_write(status: str) -> str:
+    normalized = status.strip().lower()
+    if normalized not in _TASK_STATUSES:
+        raise ValueError(f"invalid Task status: {status!r}")
+    return normalized
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -167,6 +184,7 @@ class Storage:
         silently returning or creating a different Task.
         """
 
+        status = _task_status_for_write(status)
         now = utc_now()
         normalized_goal = goal.strip()
         with self._lock:
@@ -342,6 +360,7 @@ class Storage:
         pending_clarification_id: Optional[str],
         interpreted_goal_summary: Optional[str],
     ) -> Dict[str, Any]:
+        status = _task_status_for_write(status)
         now = utc_now()
         with self._lock:
             conn = self._connect()
@@ -773,10 +792,11 @@ class Storage:
             try:
                 rows = conn.execute(
                     """
-                    SELECT id, task_id, action_id, capability, data_json, created_at
-                    FROM observations
-                    WHERE task_id = ? AND verified = 1
-                    ORDER BY id
+                    SELECT o.id, o.task_id, o.action_id, o.capability, o.data_json, o.created_at,
+                           a.payload_json AS arguments_json
+                    FROM observations o LEFT JOIN actions a ON a.id=o.action_id
+                    WHERE o.task_id = ? AND o.verified = 1
+                    ORDER BY o.id
                     """,
                     (task_id,),
                 ).fetchall()
@@ -1307,6 +1327,15 @@ class Storage:
                 result = {
                     "task": self._task_dict(task),
                     "runtime_revision": int(runtime["runtime_revision"]),
+                    "completed_creations": [
+                        {"capability": item["action_type"],
+                         "title": _loads(item["payload_json"], {}).get("title")}
+                        for item in conn.execute(
+                            "SELECT action_type, payload_json FROM actions "
+                            "WHERE task_id=? AND status='succeeded' AND action_type LIKE '%.create'",
+                            (task_id,),
+                        ).fetchall()
+                    ],
                     "user_turns": [
                         {
                             "seq": int(row["seq"]),
@@ -1382,10 +1411,11 @@ class Storage:
                 ).fetchone()
                 observation_rows = conn.execute(
                     """
-                    SELECT id, task_id, action_id, capability, data_json, created_at
-                    FROM observations
-                    WHERE task_id = ? AND verified = 1
-                    ORDER BY id
+                    SELECT o.id, o.task_id, o.action_id, o.capability, o.data_json, o.created_at,
+                           a.payload_json AS arguments_json
+                    FROM observations o LEFT JOIN actions a ON a.id=o.action_id
+                    WHERE o.task_id = ? AND o.verified = 1
+                    ORDER BY o.id
                     """,
                     (task_id,),
                 ).fetchall()
@@ -1495,6 +1525,7 @@ class Storage:
                         "task_id": row["task_id"],
                         "action_id": row["action_id"],
                         "capability": row["capability"],
+                        "arguments": _loads(row["arguments_json"], {}),
                         "data": _loads(row["data_json"], {}),
                         "created_at": row["created_at"],
                     }
@@ -3704,6 +3735,31 @@ class Storage:
                         or attempt["latest_outcome"] == "UNKNOWN"
                     )
                 )
+                # An unfinished native *read* has no external mutation to
+                # reconcile. In particular legacy location/query Tasks may
+                # outlive the old device journal. Cancellation discards their
+                # result, not a claim that the read ever succeeded.
+                cancellable_native_reads = {
+                    "location.current", "reminder.query", "calendar.query", "calendar.freebusy",
+                    "contacts.query", "alarm.query", "alarm.read",
+                }
+                read_can_settle = bool(
+                    in_flight_or_ambiguous and open_action is not None and attempt is not None
+                    and attempt["source_kind"] == "ios"
+                    and open_action["action_type"] in cancellable_native_reads
+                )
+                if read_can_settle:
+                    conn.execute(
+                        "UPDATE action_attempts SET status='FINISHED', latest_outcome='CANCELLED', "
+                        "error_text=?, finished_at=?, updated_at=? WHERE id=?",
+                        (reason or "user cancelled read-only observation", now, now, attempt["id"]),
+                    )
+                    conn.execute(
+                        "INSERT INTO traces (task_id,event_type,data_json,created_at) VALUES (?,?,?,?)",
+                        (task_id, "action.read_cancelled", _json({"action_id": open_action["id"],
+                         "attempt_id": attempt["id"], "reason": "no_external_mutation"}), now),
+                    )
+                    in_flight_or_ambiguous = False
                 conn.execute("UPDATE task_inbox_events SET status = 'CONSUMED', consumed_at = ? WHERE event_id = ?", (now, event_id))
                 if in_flight_or_ambiguous:
                     conn.execute(
@@ -3803,6 +3859,16 @@ class Storage:
                     raise InvalidPlannerTransitionError("Action has no interrupt request")
                 if str(action["status"]).lower() != "reconciling" or attempt["latest_outcome"] != "UNKNOWN":
                     raise InvalidPlannerTransitionError("Action is not an interrupted UNKNOWN reconciliation candidate")
+                conn.execute(
+                    """
+                    UPDATE action_attempts
+                    SET status = 'FINISHED', latest_outcome = 'CANCELLED',
+                        error_text = 'reconciled definitely not started',
+                        finished_at = COALESCE(finished_at, ?), updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (now, now, attempt["id"]),
+                )
                 conn.execute("UPDATE actions SET status = 'cancelled', updated_at = ? WHERE id = ?", (now, action_id))
                 conn.execute("UPDATE tasks SET status = 'active', terminal_reason = NULL, finished_at = NULL, updated_at = ? WHERE id = ?", (now, task_id))
                 conn.execute(
@@ -3850,10 +3916,26 @@ class Storage:
                 conn.execute("BEGIN IMMEDIATE")
                 task = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
                 action = conn.execute("SELECT * FROM actions WHERE id = ? AND task_id = ?", (action_id, task_id)).fetchone()
-                if task is None or action is None:
+                attempt = conn.execute(
+                    "SELECT * FROM action_attempts WHERE action_id = ? ORDER BY attempt_number DESC LIMIT 1",
+                    (action_id,),
+                ).fetchone()
+                if task is None or action is None or attempt is None:
                     raise KeyError(action_id)
                 if task["cancel_requested_at"] is None:
                     raise InvalidPlannerTransitionError("Task has no cancellation request")
+                if str(action["status"]).lower() != "reconciling" or attempt["latest_outcome"] != "UNKNOWN":
+                    raise InvalidPlannerTransitionError("Action is not a cancelled UNKNOWN reconciliation candidate")
+                conn.execute(
+                    """
+                    UPDATE action_attempts
+                    SET status = 'FINISHED', latest_outcome = 'CANCELLED',
+                        error_text = 'reconciled definitely not started',
+                        finished_at = COALESCE(finished_at, ?), updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (now, now, attempt["id"]),
+                )
                 conn.execute("UPDATE actions SET status = 'cancelled', updated_at = ? WHERE id = ?", (now, action_id))
                 conn.execute(
                     "UPDATE tasks SET status = 'cancelled', terminal_reason = ?, finished_at = ?, updated_at = ? WHERE id = ?",

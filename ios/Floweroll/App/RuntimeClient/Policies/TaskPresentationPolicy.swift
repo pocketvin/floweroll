@@ -28,6 +28,135 @@ enum RuntimeTaskDetailUpdatePolicy {
 
 
 
+/// Durable business lifecycle reported by Host Task truth.
+///
+/// This deliberately does NOT contain `needsUser`: needing user input is an
+/// orthogonal interaction dimension and may coexist with an active Task while
+/// already-authorized work continues.
+enum RuntimeTaskLifecycle: Equatable, Sendable {
+    case active
+    case waiting
+    case blocked
+    case completed
+    case failed
+    case cancelled
+    case unknown
+
+    init(hostStatus: String) {
+        switch hostStatus.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "active": self = .active
+        case "waiting", "needs_user": self = .waiting
+        case "blocked": self = .blocked
+        case "completed": self = .completed
+        case "failed": self = .failed
+        case "cancelled": self = .cancelled
+        default: self = .unknown
+        }
+    }
+
+    var isTerminal: Bool {
+        switch self {
+        case .completed, .failed, .cancelled: return true
+        case .active, .waiting, .blocked, .unknown: return false
+        }
+    }
+}
+
+
+/// Pending user interaction is not a Task lifecycle state.
+enum RuntimeTaskInteractionState: Equatable, Sendable {
+    case none
+    case clarification
+    case actionInput
+    /// Task Index and legacy `needs_user` status can prove that input is needed
+    /// without carrying the typed interaction payload.
+    case needsUserHint
+
+    var requiresUser: Bool { self != .none }
+}
+
+
+/// Canonical, orthogonal state dimensions derived from Host truth.
+struct RuntimeTaskStateDimensions: Equatable, Sendable {
+    let lifecycle: RuntimeTaskLifecycle
+    let interaction: RuntimeTaskInteractionState
+
+    init(
+        status: String,
+        needsUserHint: Bool = false,
+        pendingInteraction: HostPendingInteraction? = nil,
+        hasRawPendingInteraction: Bool = false
+    ) {
+        let lifecycle = RuntimeTaskLifecycle(hostStatus: status)
+        self.lifecycle = lifecycle
+
+        // Terminal Host truth is absorbing. A stale interaction payload cannot
+        // resurrect a completed/failed/cancelled Task as user-waiting.
+        guard !lifecycle.isTerminal else {
+            interaction = .none
+            return
+        }
+
+        if let pendingInteraction {
+            switch pendingInteraction {
+            case .clarification: interaction = .clarification
+            case .actionInput: interaction = .actionInput
+            }
+        } else if needsUserHint
+                    || hasRawPendingInteraction
+                    || status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "needs_user" {
+            interaction = .needsUserHint
+        } else {
+            interaction = .none
+        }
+    }
+
+    var displayState: RuntimeTaskPresentationState {
+        switch lifecycle {
+        case .completed: return .completed
+        case .failed: return .failed
+        case .cancelled: return .cancelled
+        case .unknown: return .paused
+        case .active, .waiting, .blocked: break
+        }
+
+        if interaction.requiresUser { return .needsUser }
+        switch lifecycle {
+        case .blocked: return .paused
+        case .waiting: return .waiting
+        case .active: return .active
+        case .unknown:
+            assertionFailure("unknown lifecycle handled above")
+            return .paused
+        case .completed, .failed, .cancelled:
+            assertionFailure("terminal lifecycle handled above")
+            return .active
+        }
+    }
+}
+
+
+/// Whether a nonterminal Task still benefits from an iPhone execution/recovery
+/// window. This is deliberately separate from UI activity: a Task can remain
+/// visible as nonterminal while it is paused or genuinely waiting for the user.
+enum RuntimeTaskExecutionEligibilityPolicy {
+    static func requiresDeviceExecution(_ state: RuntimeTaskStateDimensions) -> Bool {
+        switch state.lifecycle {
+        case .active:
+            return true
+        case .waiting:
+            return !state.interaction.requiresUser
+        case .blocked:
+            return false
+        case .completed, .failed, .cancelled:
+            return false
+        case .unknown:
+            return false
+        }
+    }
+}
+
+
 enum RuntimeTaskPresentationState: String, Equatable, Sendable {
     case active
     case waiting
@@ -70,8 +199,11 @@ enum RuntimeTaskPresentationState: String, Equatable, Sendable {
 }
 
 struct RuntimeTaskPresentationTruth: Equatable, Sendable {
-    let state: RuntimeTaskPresentationState
+    let dimensions: RuntimeTaskStateDimensions
 
+    var lifecycle: RuntimeTaskLifecycle { dimensions.lifecycle }
+    var interaction: RuntimeTaskInteractionState { dimensions.interaction }
+    var state: RuntimeTaskPresentationState { dimensions.displayState }
     var isTerminal: Bool { state.isTerminal }
     var statusLabel: String { state.statusLabel }
 
@@ -80,32 +212,20 @@ struct RuntimeTaskPresentationTruth: Equatable, Sendable {
         needsUser: Bool = false,
         hasPendingInteraction: Bool = false
     ) -> RuntimeTaskPresentationTruth {
-        // Durable Task terminal state is absorbing. Presentation hints, stale
-        // interaction state and local acknowledgement can never downgrade it.
-        switch status.lowercased() {
-        case "completed": return RuntimeTaskPresentationTruth(state: .completed)
-        case "failed": return RuntimeTaskPresentationTruth(state: .failed)
-        case "cancelled": return RuntimeTaskPresentationTruth(state: .cancelled)
-        default: break
-        }
-
-        if needsUser || hasPendingInteraction {
-            return RuntimeTaskPresentationTruth(state: .needsUser)
-        }
-        if status.lowercased() == "blocked" {
-            return RuntimeTaskPresentationTruth(state: .paused)
-        }
-        if status.lowercased() == "waiting" {
-            return RuntimeTaskPresentationTruth(state: .waiting)
-        }
-        return RuntimeTaskPresentationTruth(state: .active)
+        RuntimeTaskPresentationTruth(
+            dimensions: RuntimeTaskStateDimensions(
+                status: status,
+                needsUserHint: needsUser,
+                hasRawPendingInteraction: hasPendingInteraction
+            )
+        )
     }
 }
 
 enum RuntimeTaskRetryPolicy {
     nonisolated static func canRetry(_ view: HostTaskView) -> Bool {
-        view.presentationTruth.state == .paused
-            && view.typedPendingInteraction == nil
+        view.presentationTruth.lifecycle == .blocked
+            && !view.presentationTruth.interaction.requiresUser
             && view.runtime?.blockReason == "planner_runtime_error"
     }
 }
@@ -121,16 +241,26 @@ enum RuntimeTaskComposerPolicy {
 
 extension HostTaskIndexItem {
     var presentationTruth: RuntimeTaskPresentationTruth {
-        .taskStatus(status, needsUser: needsUser)
+        RuntimeTaskPresentationTruth(
+            dimensions: RuntimeTaskStateDimensions(
+                status: status,
+                needsUserHint: needsUser
+            )
+        )
     }
 }
 
 extension HostTaskView {
-    var presentationTruth: RuntimeTaskPresentationTruth {
-        .taskStatus(
-            task.status,
-            hasPendingInteraction: pendingInteraction != nil
+    var runtimeStateDimensions: RuntimeTaskStateDimensions {
+        RuntimeTaskStateDimensions(
+            status: task.status,
+            pendingInteraction: typedPendingInteraction,
+            hasRawPendingInteraction: pendingInteraction != nil
         )
+    }
+
+    var presentationTruth: RuntimeTaskPresentationTruth {
+        RuntimeTaskPresentationTruth(dimensions: runtimeStateDimensions)
     }
 }
 

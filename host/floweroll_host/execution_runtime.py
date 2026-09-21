@@ -11,7 +11,7 @@ from .capability_registry import CapabilityRegistry
 from .execution_contracts import CapabilityAdapter
 from .planner_contracts import CapabilitySpec
 from .presentation import canonical_json
-from .storage import ActionAdmissionSupersededError, Storage
+from .storage import ActionAdmissionSupersededError, InvalidPlannerTransitionError, Storage
 from .task_capability_policy import EffectiveTaskCapabilityPolicy
 
 
@@ -122,7 +122,11 @@ class ExecutionRuntime:
                 policy_basis["task"], policy_basis["user_turns"]
             )
             spec = self._policy_spec(action["action_type"])
-            policy_decision = effective_policy.decide(spec, self.capability_registry)
+            policy_decision = effective_policy.decide(
+                spec, self.capability_registry, arguments=action["payload"],
+                prior_created_titles=[item["title"] for item in policy_basis["completed_creations"]
+                                      if item["capability"] == action["action_type"]],
+            )
             policy_revision = int(policy_basis["runtime_revision"])
             if not policy_decision.allowed:
                 self.storage.fail_action_task_denied(
@@ -309,14 +313,25 @@ class ExecutionRuntime:
                     error=(verification.error or "transient failure") + "; automatic retry is not safe",
                 )
             elif int(attempt["attempt_number"]) >= profile.max_attempts:
-                completed = self.storage.finish_action_attempt_failure(
-                    task_id=task_id,
-                    action_id=action_id,
-                    attempt_id=attempt["attempt_id"],
-                    outcome="TERMINAL_FAILURE",
-                    result=output or {},
-                    error=(verification.error or "transient failure") + "; retry budget exhausted",
-                )
+                reason = (verification.error or "transient failure") + "; retry budget exhausted"
+                if (action["action_type"] in {"web.fetch", "web.search", "docs.query"}
+                        and profile.idempotency_mode == "NATURAL_READ_ONLY"
+                        and action.get("on_verified") == "REPLAN"):
+                    # Failure of one research source is not failure of the
+                    # user's entire composite goal. Preserve the failed Attempt
+                    # and let Planner use existing evidence / another source.
+                    # TLS verification and bounded source retries stay enabled.
+                    completed = self.storage.finish_action_attempt_model_correctable(
+                        task_id=task_id, action_id=action_id, attempt_id=attempt["attempt_id"],
+                        result={**(output or {}), "error_kind": "model_correctable",
+                                "recovery_hint": "此来源重试已耗尽；保留已有证据，换来源或推进其他工作，不重试同一URL，也不伪称已读取。"},
+                        error=reason,
+                    )
+                else:
+                    completed = self.storage.finish_action_attempt_failure(
+                        task_id=task_id, action_id=action_id, attempt_id=attempt["attempt_id"],
+                        outcome="TERMINAL_FAILURE", result=output or {}, error=reason,
+                    )
             else:
                 wake_at = (
                     datetime.now(timezone.utc)
@@ -394,6 +409,81 @@ class ExecutionRuntime:
             attempt_id=attempt["attempt_id"],
             reason=reason,
         )
+
+    def reconcile_device_definitely_not_started(
+        self,
+        *,
+        task_id: str,
+        action_id: str,
+        attempt_id: str,
+    ) -> Dict[str, Any]:
+        """Finalize a stopped iPhone Action after read-back proves no effect."""
+        action = self.storage.get_action(action_id)
+        if action is None or action["task_id"] != task_id:
+            raise KeyError(action_id)
+        adapter = self._adapter(action["action_type"])
+        if adapter.source_kind != "ios":
+            raise InvalidPlannerTransitionError(
+                "definitely-not-started reconciliation is device-only"
+            )
+
+        task = self.storage.get_task(task_id)
+        attempt = self.storage.current_action_attempt(action_id)
+        if task is None or attempt is None or attempt["attempt_id"] != attempt_id:
+            raise KeyError(attempt_id)
+
+        cancel_requested = task.get("cancel_requested_at") is not None
+        interrupt_requested = action.get("interrupt_requested_at") is not None
+        action_status = str(action["status"]).lower()
+        task_status = str(task["status"]).lower()
+
+        # An identical POST may be replayed after the first response is lost.
+        if action_status == "cancelled":
+            if cancel_requested and task_status == "cancelled":
+                return {
+                    "task": task, "action": action, "attempt": attempt, "duplicate": True
+                }
+            if interrupt_requested and task_status not in {"completed", "failed", "cancelled"}:
+                return {
+                    "task": task, "action": action, "attempt": attempt, "duplicate": True
+                }
+
+        if not cancel_requested and not interrupt_requested:
+            raise InvalidPlannerTransitionError(
+                "Action is not stopped; definitely-not-started proof cannot finalize it"
+            )
+
+        attempt_status = str(attempt["status"]).upper()
+        if attempt_status == "IN_FLIGHT":
+            self.storage.mark_action_attempt_unknown(
+                task_id=task_id,
+                action_id=action_id,
+                attempt_id=attempt_id,
+                reason="device read-back proved the stopped native operation did not start",
+            )
+        elif not (
+            attempt_status == "FINISHED"
+            and attempt.get("latest_outcome") == "UNKNOWN"
+            and action_status == "reconciling"
+        ):
+            raise InvalidPlannerTransitionError(
+                "Attempt is not eligible for definitely-not-started reconciliation"
+            )
+
+        if cancel_requested:
+            finalized = self.storage.finalize_cancel_after_reconciliation(
+                task_id=task_id, action_id=action_id
+            )
+        else:
+            finalized = self.storage.finalize_action_interrupt_after_reconciliation(
+                task_id=task_id, action_id=action_id
+            )
+        return {
+            "task": finalized,
+            "action": self.storage.get_action(action_id),
+            "attempt": self.storage.get_action_attempt(attempt_id),
+            "duplicate": False,
+        }
 
     def reconcile_definitely_absent_retry_safe(
         self,

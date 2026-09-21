@@ -122,6 +122,10 @@ class ActionResultRequest(RequestModel):
     error: LegacyString | None = None
 
 
+class DeviceDefinitelyNotStartedRequest(RequestModel):
+    attempt_id: Nonblank
+
+
 class ReplyContext(RequestModel):
     clarification_id: str | None = None
 

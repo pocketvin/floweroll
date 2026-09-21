@@ -9,6 +9,7 @@ import urllib.request
 from pathlib import Path
 
 from floweroll_host.agent_loop import AgentLoop
+from floweroll_host.function_tool_adapter import FunctionToolAdapter
 from floweroll_host.server import create_server
 from floweroll_host.storage import Storage
 
@@ -143,6 +144,110 @@ class HTTPChainTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(result["task"]["status"], "failed")
         self.assertIn("did not match", result["action"]["error"])
+
+    def test_generic_action_http_cannot_steal_source_owned_host_function_attempt(self) -> None:
+        adapter = FunctionToolAdapter(
+            capability_id="host.test.read",
+            source_kind="host_function",
+            read_only=True,
+        )
+        self.server.app.execution.adapters[adapter.capability_id] = adapter
+        task, _ = self.server.app.storage.create_or_get_task(
+            task_id="product-host-function-task",
+            goal="source ownership regression",
+            invocation_source="ios_new_task",
+            policy_snapshot={},
+            submission_id="product-host-function-submission",
+        )
+        action = self.server.app.storage.create_action(
+            action_id="product-host-function-action",
+            task_id=task["task_id"],
+            step_index=1,
+            action_type=adapter.capability_id,
+            payload={"value": "safe"},
+            expected={},
+            idempotency_key="product-host-function-action",
+            on_verified="REPLAN",
+        )
+        dispatch = self.server.app.execution.next_action(
+            task["task_id"],
+            source_kind="host_function",
+        )
+        self.assertIsNotNone(dispatch)
+        assert dispatch is not None
+        attempt = self.server.app.storage.get_action_attempt(dispatch["attempt_id"])
+        self.assertEqual(attempt["source_kind"], "host_function")
+        self.assertEqual(attempt["status"], "IN_FLIGHT")
+
+        status, problem = self.request(
+            "GET",
+            f"/v1/tasks/{task['task_id']}/next-action",
+        )
+        self.assertEqual(status, 409)
+        self.assertEqual(problem["code"], "GENERIC_ACTION_ROUTE_NOT_ALLOWED")
+
+        status, problem = self.request(
+            "POST",
+            f"/v1/tasks/{task['task_id']}/actions/{action['action_id']}/result",
+            {
+                "attempt_id": dispatch["attempt_id"],
+                "success": True,
+                "output": {"forged": True},
+            },
+        )
+        self.assertEqual(status, 409)
+        self.assertEqual(problem["code"], "ACTION_RESULT_SOURCE_NOT_ALLOWED")
+
+        unchanged = self.server.app.storage.get_action_attempt(dispatch["attempt_id"])
+        self.assertEqual(unchanged["status"], "IN_FLIGHT")
+        self.assertIsNone(unchanged["latest_outcome"])
+        self.assertEqual(
+            self.server.app.storage.verified_observations(task["task_id"]),
+            [],
+        )
+
+    def test_product_ios_attempt_can_still_submit_result_over_http(self) -> None:
+        task, _ = self.server.app.storage.create_or_get_task(
+            task_id="product-ios-result-task",
+            goal="iOS source result regression",
+            invocation_source="ios_new_task",
+            policy_snapshot={},
+            submission_id="product-ios-result-submission",
+        )
+        action = self.server.app.storage.create_action(
+            action_id="product-ios-result-action",
+            task_id=task["task_id"],
+            step_index=1,
+            action_type="device.probe",
+            payload={"message": "never executed in this test"},
+            expected={"echo": "never executed in this test"},
+            idempotency_key="product-ios-result-action",
+        )
+        attempt = self.server.app.storage.start_action_attempt(
+            attempt_id="product-ios-result-attempt",
+            task_id=task["task_id"],
+            action_id=action["action_id"],
+            source_kind="ios",
+            execution_profile={},
+            dispatch_snapshot={"source": "ios"},
+            dispatch_digest="product-ios-result-digest",
+        )
+
+        status, result = self.request(
+            "POST",
+            f"/v1/tasks/{task['task_id']}/actions/{action['action_id']}/result",
+            {
+                "attempt_id": attempt["attempt_id"],
+                "success": False,
+                "output": {},
+                "error": "simulated device failure",
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(result["task"]["status"], "failed")
+        finished = self.server.app.storage.get_action_attempt(attempt["attempt_id"])
+        self.assertEqual(finished["status"], "FINISHED")
+        self.assertEqual(finished["latest_outcome"], "TERMINAL_FAILURE")
 
 
 if __name__ == "__main__":

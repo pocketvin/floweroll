@@ -202,19 +202,38 @@ final class TaskAttachmentDraft {
         guard !ids.isEmpty else { return }
         if let currentInstance {
             currentInstance.clearSubmitted(ids)
-            return
+        } else if let directory = try? PendingAttachment.directory() {
+            let url = directory.appendingPathComponent("composer-draft.json")
+            if let data = try? Data(contentsOf: url),
+               var persisted = try? JSONDecoder().decode([PendingAttachment].self, from: data) {
+                let before = persisted.count
+                persisted.removeAll { ids.contains($0.id) }
+                if persisted.count != before,
+                   let encoded = try? JSONEncoder().encode(persisted) {
+                    try? encoded.write(to: url, options: .atomic)
+                }
+            }
         }
-        guard let directory = try? PendingAttachment.directory() else { return }
-        let url = directory.appendingPathComponent("composer-draft.json")
-        guard let data = try? Data(contentsOf: url),
-              var persisted = try? JSONDecoder().decode([PendingAttachment].self, from: data)
-        else { return }
-        let before = persisted.count
-        persisted.removeAll { ids.contains($0.id) }
-        guard persisted.count != before,
-              let encoded = try? JSONEncoder().encode(persisted)
-        else { return }
-        try? encoded.write(to: url, options: .atomic)
+        // Once Host admission has been confirmed these bytes are no longer
+        // outbox truth. Keep the fast local thumbnail/open path, but move the
+        // recreatable copy to Caches so storage pressure can reclaim it.
+        PendingAttachment.moveAcceptedBytesToCache(ids)
+    }
+
+    /// Return composer attachment identities only when the durable draft can be
+    /// proven readable. Attachment cache migration must fail closed: a corrupt
+    /// ledger is not evidence that no durable attachment references exist.
+    /// Never substitute the in-memory composer here: Home may have already
+    /// instantiated an empty draft after a corrupt ledger failed to decode.
+    nonisolated static func persistedAttachmentIDsForMigration(
+        directory: URL? = nil
+    ) throws -> Set<String> {
+        let resolvedDirectory = try directory ?? PendingAttachment.directory()
+        let url = resolvedDirectory.appendingPathComponent("composer-draft.json")
+        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+        let data = try Data(contentsOf: url)
+        let persisted = try JSONDecoder().decode([PendingAttachment].self, from: data)
+        return Set(persisted.map(\.id))
     }
 
     private func persist() throws {

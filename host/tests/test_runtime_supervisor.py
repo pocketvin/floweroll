@@ -7,6 +7,7 @@ import time
 import unittest
 import urllib.request
 from pathlib import Path
+from unittest.mock import patch
 
 from floweroll_host.capabilities_v0 import REMINDER_CREATE
 from floweroll_host.openai_compatible_chat_adapter import OpenAICompatibleChatPlannerTransientError
@@ -56,6 +57,26 @@ class BlockingPlanner:
         if not self.release.wait(timeout=5):
             raise RuntimeError("test planner release timed out")
         return reminder_decision()
+
+
+class CloseTrackingMemory:
+    def __init__(self) -> None:
+        self.close_calls = 0
+        self.closed = False
+
+    def remember_user_text(self, **kwargs):
+        if self.closed:
+            raise RuntimeError("memory used after close")
+        return True
+
+    def search(self, query):
+        if self.closed:
+            raise RuntimeError("memory used after close")
+        return {"items": [], "error_type": None}
+
+    def close(self) -> None:
+        self.close_calls += 1
+        self.closed = True
 
 
 class BlockingByGoalPlanner:
@@ -111,6 +132,19 @@ class AlwaysTransientPlanner:
         raise OpenAICompatibleChatPlannerTransientError(
             "Chat Completions transport timed out or disconnected after bounded retry"
         )
+
+
+class FailingThenIdleExecutionWorker:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.recovered = threading.Event()
+
+    def sweep_once(self):
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("fixture execution scheduler failure")
+        self.recovered.set()
+        return []
 
 
 class SupervisorHTTPTests(unittest.TestCase):
@@ -184,6 +218,104 @@ class SupervisorHTTPTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=2)
+
+    def test_supervisor_stop_is_bounded_while_planner_future_finishes_naturally(self) -> None:
+        store = Storage(":memory:")
+        planner = BlockingPlanner()
+        runtime = TaskRuntime(store, planner, [REMINDER_CREATE])
+        runtime.create_task("明天十点提醒我面试")
+        supervisor = RuntimeSupervisor(
+            store,
+            runtime,
+            poll_interval_seconds=0.01,
+        )
+        supervisor.start()
+        drained = threading.Event()
+        try:
+            self.assertTrue(planner.started.wait(timeout=1))
+            started = time.monotonic()
+            self.assertFalse(
+                supervisor.stop(
+                    timeout_seconds=0.1,
+                    planner_drain_seconds=0.02,
+                )
+            )
+            self.assertLess(time.monotonic() - started, 0.5)
+
+            supervisor.when_planner_drained(drained.set)
+            planner.release.set()
+            self.assertTrue(drained.wait(timeout=1))
+            self.assertTrue(
+                supervisor.stop(
+                    timeout_seconds=0.1,
+                    planner_drain_seconds=0.2,
+                )
+            )
+        finally:
+            planner.release.set()
+
+    def test_host_close_defers_runtime_and_assets_until_running_planner_drains(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            planner = BlockingPlanner()
+            memory = CloseTrackingMemory()
+            server = create_server(
+                "127.0.0.1",
+                0,
+                str(root / "planner-close.sqlite3"),
+                task_runtime_factory=lambda store: TaskRuntime(
+                    store,
+                    planner,
+                    [REMINDER_CREATE],
+                    memory=memory,
+                ),
+                product_policy_snapshot={
+                    "allowed_capabilities": ["reminder.create"],
+                    "constraints": ["host-authoritative"],
+                },
+                task_asset_root=root / "assets",
+            )
+            app = server.app
+            task = app.accept_product_task(
+                goal="明天十点提醒我面试",
+                invocation_source="ios_new_task",
+                submission_id="planner-close-submission",
+            )
+            self.assertTrue(planner.started.wait(timeout=2))
+            self.assertIsNotNone(app.task_assets)
+            assert app.task_assets is not None
+
+            try:
+                with patch.object(
+                    app.task_assets,
+                    "close",
+                    wraps=app.task_assets.close,
+                ) as close_assets:
+                    started = time.monotonic()
+                    app.close()
+                    self.assertLess(time.monotonic() - started, 2.0)
+                    self.assertEqual(memory.close_calls, 0)
+                    self.assertEqual(close_assets.call_count, 0)
+
+                    planner.release.set()
+                    deadline = time.monotonic() + 2
+                    while time.monotonic() < deadline:
+                        action = app.storage.get_open_action(task["task_id"])
+                        if (
+                            action is not None
+                            and memory.close_calls == 1
+                            and close_assets.call_count == 1
+                        ):
+                            break
+                        time.sleep(0.02)
+
+                    action = app.storage.get_open_action(task["task_id"])
+                    self.assertIsNotNone(action)
+                    self.assertEqual(memory.close_calls, 1)
+                    self.assertEqual(close_assets.call_count, 1)
+            finally:
+                planner.release.set()
+                server.server_close()
 
     def test_slow_task_does_not_head_of_line_block_independent_task(self) -> None:
         store = Storage(":memory:")
@@ -478,6 +610,30 @@ class SupervisorFailureTests(unittest.TestCase):
         self.assertIsNone(runtime_state["block_reason"])
         self.assertEqual(runtime_state["wait_kind"], "RETRY_BACKOFF")
         self.assertEqual(store.consecutive_planner_failures(task["task_id"]), 1)
+
+    def test_execution_scheduler_failure_is_logged_and_loop_keeps_running(self) -> None:
+        store = Storage(":memory:")
+        worker = FailingThenIdleExecutionWorker()
+        supervisor = RuntimeSupervisor(
+            store,
+            None,
+            execution_workers=[worker],
+            poll_interval_seconds=0.005,
+        )
+
+        with self.assertLogs("floweroll_host.runtime_supervisor", level="ERROR") as captured:
+            supervisor.start()
+            try:
+                self.assertTrue(worker.recovered.wait(timeout=1))
+            finally:
+                supervisor.stop()
+
+        self.assertGreaterEqual(worker.calls, 2)
+        combined = "\n".join(captured.output)
+        self.assertIn("runtime supervisor execution loop failed", combined)
+        self.assertIn("error_type=RuntimeError", combined)
+        self.assertIn("origin=test_runtime_supervisor.py", combined)
+        self.assertNotIn("fixture execution scheduler failure", combined)
 
 
 if __name__ == "__main__":

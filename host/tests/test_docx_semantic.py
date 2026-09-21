@@ -128,6 +128,8 @@ class DocxSemanticContractTests(unittest.TestCase):
                 self.assertEqual(inspect.adapter.execution_profile.verification_mode, "DOCX_SOURCE_READBACK")
                 self.assertEqual(generate.adapter.execution_profile.verification_mode, "DOCX_ARTIFACT_READBACK")
                 self.assertEqual(generate.adapter.execution_profile.idempotency_mode, "EXACT_INPUT")
+                self.assertEqual(generate.adapter.execution_profile.reconciliation_mode, "REPLAY_SAME_ATTEMPT")
+                self.assertTrue(generate.adapter.replay_safe)
                 self.assertEqual(inspect.spec.post_verify_mode, "REPLAN_REQUIRED")
                 self.assertEqual(generate.spec.post_verify_mode, "COMPLETE_ALLOWED")
                 self.assertEqual(capability_semantics(inspect.spec, registry).operation, "read")

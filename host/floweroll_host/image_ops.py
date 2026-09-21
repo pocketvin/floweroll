@@ -234,6 +234,8 @@ class ImageOpsAdapter:
     def __init__(self, capability_id: str, tools: "ImageOpsToolSet", *, read_only: bool) -> None:
         self.capability_id = capability_id
         self.tools = tools
+        self.read_only = read_only
+        self.replay_safe = True
         self.execution_profile = ExecutionProfile(
             timeout_seconds=45,
             idempotency_mode="NATURAL_READ_ONLY" if read_only else "EXACT_INPUT",
@@ -241,7 +243,7 @@ class ImageOpsAdapter:
             verification_mode=(
                 "IMAGE_SOURCE_READBACK" if read_only else "IMAGE_ARTIFACT_READBACK"
             ),
-            reconciliation_mode="NONE",
+            reconciliation_mode="SAFE_REREAD" if read_only else "REPLAY_SAME_ATTEMPT",
             max_attempts=1 if read_only else 2,
             retry_backoff_seconds=1,
         )

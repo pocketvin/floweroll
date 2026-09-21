@@ -186,7 +186,7 @@ final class ObservationTests: XCTestCase {
         for await input in pair.stream {
             let start = try XCTUnwrap(input.bufferStartTime)
             XCTAssertGreaterThanOrEqual(CMTimeCompare(start, end), 0)
-            end = start + CMTime(value: Int64(input.buffer.frameLength), timescale: Int32(input.buffer.format.sampleRate))
+            end = start + input.bufferDuration
             count += 1
         }
         XCTAssertGreaterThan(count, 1)
@@ -326,6 +326,12 @@ final class ObservationTests: XCTestCase {
         XCTAssertFalse(ObservationController.microphoneInputAdvanced(since: 100.0, latest: 100.0))
         XCTAssertTrue(ObservationController.microphoneInputAdvanced(since: nil, latest: 100.0))
         XCTAssertFalse(ObservationController.microphoneInputAdvanced(since: nil, latest: nil))
+        XCTAssertFalse(
+            ObservationController.audioDeactivationIsSystemInterruption(.appDeactivated),
+            "normal app-requested audio deactivation must not look like a microphone interruption"
+        )
+        XCTAssertTrue(ObservationController.audioResumptionShouldResume(.shouldResume))
+        XCTAssertFalse(ObservationController.audioResumptionShouldResume(.shouldNotResume))
     }
 
     func testUploadBatchUsesEncodedBytesNotCharacterCount() throws {

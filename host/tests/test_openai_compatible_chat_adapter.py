@@ -64,6 +64,27 @@ class OpenAICompatibleChatPlannerAdapterTests(unittest.TestCase):
         self.assertNotIn("ak-fb3", redacted)
         self.assertNotIn("sk-secret", redacted)
 
+    def test_provider_can_set_kimi_reasoning_effort_without_changing_runtime_schema(self) -> None:
+        adapter = OpenAICompatibleChatPlannerAdapter(
+            api_key="test-key",
+            base_url="https://api.moonshot.cn/v1",
+            model="kimi-k3",
+            reasoning_effort_override="low",
+        )
+        payload = adapter._chat_payload(self.request())
+        self.assertEqual(payload["reasoning_effort"], "low")
+        self.assertEqual(payload["max_completion_tokens"], self.request()["max_output_tokens"])
+        self.assertEqual(payload["response_format"]["type"], "json_schema")
+
+    def test_invalid_reasoning_effort_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "reasoning_effort_override"):
+            OpenAICompatibleChatPlannerAdapter(
+                api_key="test-key",
+                base_url="https://api.moonshot.cn/v1",
+                model="kimi-k3",
+                reasoning_effort_override="extreme",
+            )
+
     def test_provider_can_override_completion_budget_without_changing_runtime_schema(self) -> None:
         adapter = OpenAICompatibleChatPlannerAdapter(
             api_key="test-key",

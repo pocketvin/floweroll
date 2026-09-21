@@ -149,6 +149,8 @@ final class RuntimeTaskStore {
     @ObservationIgnored
     private var presentationIndexRefreshInFlight = false
     @ObservationIgnored
+    private var foregroundRecoveryInFlight = false
+    @ObservationIgnored
     private var taskViewFetchLeases: [String: TaskViewFetchLease] = [:]
     @ObservationIgnored
     private var cancellationConvergenceTasks: [String: Task<Void, Never>] = [:]
@@ -246,9 +248,13 @@ final class RuntimeTaskStore {
         }
         return RuntimeTaskInboxReadModel(
             presentedThreadID: presentedThreadID,
-            needsUser: newestFirst(needsUserTasks),
-            runningElsewhere: newestFirst(runningTasks.filter(isElsewhere)),
-            terminalElsewhere: newestFirst(historyTasks.filter(isElsewhere))
+            needsUser: newestFirst(needsUserTasks.filter { !historyPresentationState.isHidden(taskID: $0.taskID) }),
+            runningElsewhere: newestFirst(runningTasks.filter {
+                isElsewhere($0) && !historyPresentationState.isHidden(taskID: $0.taskID)
+            }),
+            terminalElsewhere: newestFirst(historyTasks.filter {
+                isElsewhere($0) && !historyPresentationState.isHidden(taskID: $0.taskID)
+            })
         )
     }
 
@@ -257,7 +263,7 @@ final class RuntimeTaskStore {
     var completionAttentionReadModel: RuntimeCompletionAttentionReadModel {
         RuntimeCompletionAttentionReadModel(
             terminalTasks: Self.canonicalTaskIndexItems(historyTasks)
-                .filter { $0.presentationTruth.isTerminal }
+                .filter { $0.presentationTruth.isTerminal && !historyPresentationState.isHidden(taskID: $0.taskID) }
         )
     }
 
@@ -369,6 +375,7 @@ final class RuntimeTaskStore {
 
     func bootstrap() async {
         Self.logger.info("bootstrap started; configured=\(self.hasConfiguredEndpoint, privacy: .public)")
+        await migrateAcceptedAttachmentBytesToCache()
         guard hasConfiguredEndpoint else {
             connectionState = .notConfigured
             lastError = nil
@@ -505,6 +512,40 @@ final class RuntimeTaskStore {
     /// notifications, Live Activity reconciliation, or Home-thread hydration.
     /// Failures keep the last good presentation model instead of flashing a
     /// transient connection error every polling interval.
+    /// App lifecycle owns recovery; opening a list or polling presentation is
+    /// intentionally not a native-execution trigger. Calls coalesce while a
+    /// pass awaits I/O, and the shared DeviceRuntimeWorker keeps exact leases.
+    func recoverForegroundWork() async {
+        guard hasConfiguredEndpoint, !foregroundRecoveryInFlight, !Task.isCancelled else { return }
+        foregroundRecoveryInFlight = true
+        defer { foregroundRecoveryInFlight = false }
+        do {
+            let client = try makeClient()
+            // Migrate explicit historical user deletions, not arbitrary old
+            // Tasks. Stable cancellation event IDs are safe across app restarts.
+            for task in activeTasks where historyPresentationState.isHidden(taskID: task.taskID) {
+                try Task.checkCancellation()
+                let response = try await client.cancelTask(
+                    taskID: task.taskID,
+                    eventID: "ios-hidden-task-delete-\(task.taskID)",
+                    reason: "恢复此前用户删除任务的停止请求"
+                )
+                _ = adoptCancellationSnapshot(response.task)
+            }
+            // Don't hold this foreground pass waiting for background file
+            // bytes. A verified receipt can immediately admit the exact outbox
+            // item; unfinished transfers retain their existing system owner.
+            await retryPendingSubmissions(onlyVerifiedAttachments: true)
+            if deviceWorker != nil { await AlarmConfigurationReplacement.recoverManualUpdates() }
+            try Task.checkCancellation()
+            try await refreshThrowing()
+        } catch is CancellationError {
+            return
+        } catch {
+            Self.logger.notice("foreground recovery deferred; error_type=\(String(reflecting: type(of: error)), privacy: .public)")
+        }
+    }
+
     func refreshPresentationIndex() async {
         guard hasConfiguredEndpoint,
               !isRefreshing,
@@ -988,7 +1029,7 @@ final class RuntimeTaskStore {
         let client = try makeClient()
         let response = try await client.retryTask(taskID: normalized)
         _ = adoptSubmittedTask(response.task)
-        if response.task.status.lowercased() == "active" {
+        if RuntimeTaskLifecycle(hostStatus: response.task.status) == .active {
             // The retry mutation is already durable before acquiring the iOS
             // execution owner. No fake UserTurn or duplicate Host Task exists.
             await renewBackgroundExecution(taskID: normalized)
@@ -1552,7 +1593,11 @@ final class RuntimeTaskStore {
                       self.cancellationConvergenceGenerations[taskID] == generation
                 else { return }
                 do {
-                    let snapshot = try await self.makeClient().fetchTaskView(taskID: taskID)
+                    let client = try self.makeClient()
+                    if let worker = self.deviceWorker {
+                        _ = await worker.processTask(client: client, taskID: taskID)
+                    }
+                    let snapshot = try await client.fetchTaskView(taskID: taskID)
                     let canonical = self.cacheTaskView(snapshot)
                     if canonical.presentationTruth.isTerminal {
                         if self.defaults.string(forKey: Self.continuationTaskDefaultsKey) == taskID {
@@ -1687,7 +1732,9 @@ final class RuntimeTaskStore {
                 // Check durable task state once; continue only for an ACTIVE
                 // task (for example while a Host/MCP Action is progressing).
                 let view = try await client.fetchTaskView(taskID: taskID)
-                if view.task.status.lowercased() != "active" {
+                if !RuntimeTaskExecutionEligibilityPolicy.requiresDeviceExecution(
+                    view.runtimeStateDimensions
+                ) {
                     return
                 }
             }
@@ -1866,6 +1913,30 @@ final class RuntimeTaskStore {
         try? FileManager.default.removeItem(at: url)
     }
 
+    private func migrateAcceptedAttachmentBytesToCache() async {
+        // Upgrade migration is destructive with respect to durable outbox
+        // storage. If either ledger cannot be proven readable, keep bytes in
+        // Application Support and let a later healthy launch retry migration.
+        guard let pendingStore else { return }
+        let composerIDs: Set<String>
+        do {
+            composerIDs = try TaskAttachmentDraft.persistedAttachmentIDsForMigration()
+        } catch {
+            Self.logger.error(
+                "attachment cache migration skipped; composer_ledger_error_type=\(String(reflecting: type(of: error)), privacy: .public)"
+            )
+            return
+        }
+        var protectedIDs = composerIDs
+        protectedIDs.formUnion(await pendingStore.attachmentIDsInUse())
+        let ids = protectedIDs
+        await Task.detached(priority: .utility) {
+            PendingAttachment.moveUnreferencedDurableBytesToCache(
+                protectedIDs: ids
+            )
+        }.value
+    }
+
     func pendingSubmission(submissionID: String) async -> PendingSubmission? {
         guard let pendingStore else { return nil }
         return await pendingStore.submission(id: submissionID)
@@ -1897,10 +1968,18 @@ final class RuntimeTaskStore {
             }
     }
 
-    func retryPendingSubmissions() async {
+    func retryPendingSubmissions(onlyVerifiedAttachments: Bool = false) async {
         guard let pendingStore, let client = try? makeClient() else { return }
         for pending in await pendingStore.pending() {
+            guard !Task.isCancelled else { return }
             do {
+                if onlyVerifiedAttachments {
+                    var ready = true
+                    for attachment in pending.attachments ?? [] {
+                        if try await client.uploadedAttachmentIfVerified(attachment) == nil { ready = false; break }
+                    }
+                    if !ready { continue }
+                }
                 let task = try await client.submitExisting(
                     pending,
                     pendingStore: pendingStore,
@@ -1911,7 +1990,19 @@ final class RuntimeTaskStore {
                     submissionID: pending.submissionID,
                     reason: "recovery_admitted"
                 )
-                await beginAcceptedTaskExecutionHandoff(taskID: task.taskID, goal: task.goal)
+                if onlyVerifiedAttachments {
+                    // Automatic recovery is not a new foreground user gesture.
+                    DeviceBackgroundExecutionController.shared.trackDurableTask(
+                        taskID: task.taskID, reason: "foreground_outbox_receipt_admitted"
+                    )
+                } else {
+                    await beginAcceptedTaskExecutionHandoff(taskID: task.taskID, goal: task.goal)
+                }
+                await HomeInAppIntentEvents.postAccepted(
+                    submissionID: pending.submissionID, taskID: task.taskID,
+                    attachmentIDs: (pending.attachments ?? []).map(\.id),
+                    joinedExistingExecution: false
+                )
                 let acceptedAttachmentIDs = Set((pending.attachments ?? []).map(\.id))
                 TaskAttachmentDraft.clearAcceptedReferences(acceptedAttachmentIDs)
                 for attachmentID in acceptedAttachmentIDs {
@@ -1933,7 +2024,15 @@ final class RuntimeTaskStore {
         }
 
         for pending in await pendingStore.pendingUserTurns() {
+            guard !Task.isCancelled else { return }
             do {
+                if onlyVerifiedAttachments {
+                    var ready = true
+                    for attachment in pending.attachments ?? [] {
+                        if try await client.uploadedAttachmentIfVerified(attachment) == nil { ready = false; break }
+                    }
+                    if !ready { continue }
+                }
                 _ = try await client.submitExistingUserTurn(
                     pending,
                     pendingStore: pendingStore,
@@ -1949,7 +2048,13 @@ final class RuntimeTaskStore {
                     attachmentUploadStates.removeValue(forKey: attachmentID)
                 }
                 setContinuationTarget(taskID: pending.taskID)
-                await renewBackgroundExecution(taskID: pending.taskID)
+                if onlyVerifiedAttachments {
+                    DeviceBackgroundExecutionController.shared.trackDurableTask(
+                        taskID: pending.taskID, reason: "foreground_user_turn_receipt_admitted"
+                    )
+                } else {
+                    await renewBackgroundExecution(taskID: pending.taskID)
+                }
             } catch {
                 let message = Self.userMessage(for: error)
                 try? await pendingStore.markUserTurnFailed(
@@ -2100,17 +2205,21 @@ final class RuntimeTaskStore {
             }
         }
         reconcileHomeThreadPresentation(now: now, hydration: homeHydration)
-        let activeForExecution = activeTasks
-        syncDeviceExecutionLeases(active: activeForExecution)
+        let executionEligibleTasks = activeTasks.filter {
+            RuntimeTaskExecutionEligibilityPolicy.requiresDeviceExecution(
+                $0.presentationTruth.dimensions
+            )
+        }
+        syncDeviceExecutionLeases(active: executionEligibleTasks)
         let backgroundController = DeviceBackgroundExecutionController.shared
-        for task in activeForExecution {
+        for task in executionEligibleTasks {
             backgroundController.trackDurableTask(
                 taskID: task.taskID,
                 reason: "foreground_index_recovery"
             )
         }
         backgroundController.reconcileTrackedTasks(
-            activeTaskIDs: Set(activeForExecution.map(\.taskID))
+            activeTaskIDs: Set(executionEligibleTasks.map(\.taskID))
         )
         Self.logger.info(
             "Task Index refreshed; running=\(self.runningTasks.count, privacy: .public) needs_user=\(self.needsUserTasks.count, privacy: .public) history=\(self.historyTasks.count, privacy: .public)"
@@ -2288,7 +2397,7 @@ final class RuntimeTaskStore {
     }
 
     nonisolated static func isTerminalStatus(_ status: String) -> Bool {
-        ["completed", "failed", "cancelled"].contains(status.lowercased())
+        RuntimeTaskLifecycle(hostStatus: status).isTerminal
     }
 
     static func userMessage(for error: Error) -> String {

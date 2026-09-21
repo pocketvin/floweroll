@@ -185,3 +185,38 @@ extension RuntimeInteractionPolicyTests {
         reopened.clearConfiguration()
     }
 }
+
+
+extension RuntimeInteractionPolicyTests {
+    @MainActor
+    func testHiddenTasksStayOutOfAllInboxBucketsButKeepRecoveryTruth() {
+        let suite = "hidden-inbox-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = RuntimeTaskStore(defaults: defaults, pendingStore: nil, deviceWorker: nil)
+        store.clearConfiguration()
+        defer { store.clearConfiguration() }
+        _ = store.cacheTaskView(presentationView(id: "hidden-active", status: "active", updatedAt: "2026-09-21T00:00:00Z"))
+        _ = store.cacheTaskView(presentationView(id: "hidden-completed", status: "completed", updatedAt: "2026-09-21T00:00:00Z"))
+        _ = store.cacheTaskView(presentationView(id: "visible-active", status: "active", updatedAt: "2026-09-21T00:00:00Z"))
+        store.historyPresentationState.hide(taskIDs: ["hidden-active", "hidden-completed"])
+        XCTAssertEqual(store.taskInboxReadModel.runningElsewhere.map(\.taskID), ["visible-active"])
+        XCTAssertFalse(store.taskInboxReadModel.terminalElsewhere.contains { $0.taskID == "hidden-completed" })
+        XCTAssertFalse(store.completionAttentionReadModel.terminalTasks.contains { $0.taskID == "hidden-completed" })
+        XCTAssertTrue(store.activeTasks.contains { $0.taskID == "hidden-active" }, "Hidden is not a fabricated terminal Task")
+        let reopened = RuntimeTaskHistoryPresentationState(defaults: defaults)
+        XCTAssertTrue(reopened.isHidden(taskID: "hidden-active"))
+    }
+
+    func testForegroundRecoveryBelongsToAppLifecycleNotIndexRefresh() throws {
+        let app = try ProductSourceFiles.iosRoot().appendingPathComponent("Floweroll/App")
+        let content = try String(contentsOf: app.appendingPathComponent("ContentView.swift"), encoding: .utf8)
+        let store = try String(contentsOf: app.appendingPathComponent("RuntimeClient/RuntimeTaskStore.swift"), encoding: .utf8)
+        XCTAssertTrue(content.contains("await runtimeStore.recoverForegroundWork()"))
+        let start = try XCTUnwrap(store.range(of: "func refreshPresentationIndex()"))
+        let tail = String(store[start.lowerBound...])
+        let end = try XCTUnwrap(tail.range(of: "\n    }\n"))
+        XCTAssertFalse(String(tail[..<end.lowerBound]).contains("recoverForegroundWork"))
+        XCTAssertTrue(store.contains("ios-hidden-task-delete-"))
+    }
+}

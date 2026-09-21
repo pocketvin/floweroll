@@ -56,6 +56,14 @@ struct FlowerollHostClient: Sendable {
         }
     }
 
+    private struct DeviceDefinitelyNotStartedBody: Codable, Sendable {
+        let attemptID: String
+
+        enum CodingKeys: String, CodingKey {
+            case attemptID = "attempt_id"
+        }
+    }
+
     private struct UserTurnBody: Codable, Sendable {
         struct Content: Codable, Sendable {
             let kind: String
@@ -399,8 +407,16 @@ struct FlowerollHostClient: Sendable {
         onEvent: (@Sendable (AttachmentUploadEvent) -> Void)? = nil
     ) async throws -> TaskMaterialFile {
         try validateEndpointSecurity()
-        let localURL = try attachment.verifiedFileURL()
+        try Task.checkCancellation()
         onEvent?(.init(attachmentID: attachment.id, state: .checkingHost))
+        // A durable, hash/length-verified Host receipt is sufficient for
+        // admission. Background completion may arrive while local protected
+        // bytes are unavailable or have already moved to the accepted cache.
+        // Do not require those bytes again unless a transfer is really needed.
+        if let existing = try await uploadedAttachmentReceipt(fileID: attachment.id) {
+            return try verifyUploadedAttachment(existing, expected: attachment, onEvent: onEvent)
+        }
+        let localURL = try attachment.verifiedFileURL()
 
         if AttachmentBackgroundUploadPolicy.shouldUseSystemBackgroundTransfer(baseURL: baseURL),
            executionMode == .systemBackground {
@@ -443,11 +459,19 @@ struct FlowerollHostClient: Sendable {
             throw MaterialsError.message("附件字节已传完，但服务器尚未发布可校验记录，请稍后重试。")
         }
 
-        if executionMode == .immediateResumable,
-           AttachmentBackgroundUploadPolicy.shouldUseSystemBackgroundTransfer(baseURL: baseURL) {
-            await AttachmentBackgroundUploadTransport.shared.handoffToImmediateUpload(
+        let ownsImmediateBackgroundLane = (
+            executionMode == .immediateResumable
+            && AttachmentBackgroundUploadPolicy.shouldUseSystemBackgroundTransfer(baseURL: baseURL)
+        )
+        if ownsImmediateBackgroundLane {
+            await AttachmentBackgroundUploadTransport.shared.beginImmediateUploadHandoff(
                 attachmentID: attachment.id
             )
+        }
+        defer {
+            if ownsImmediateBackgroundLane {
+                AttachmentBackgroundUploadTransport.shared.endImmediateUploadHandoff(attachmentID: attachment.id)
+            }
         }
 
         if let existing = try await uploadedAttachmentReceipt(fileID: attachment.id) {
@@ -997,6 +1021,24 @@ struct FlowerollHostClient: Sendable {
         let result = try await request(
             method: "POST",
             path: ["v1", "tasks", taskID, "actions", actionID, "result"],
+            body: try JSONEncoder.floweroll.encode(body)
+        )
+        return try JSONDecoder.floweroll.decode(JSONValue.self, from: result.data)
+    }
+
+    @discardableResult
+    func submitDeviceDefinitelyNotStarted(
+        taskID: String,
+        actionID: String,
+        attemptID: String
+    ) async throws -> JSONValue {
+        let body = DeviceDefinitelyNotStartedBody(attemptID: attemptID)
+        let result = try await request(
+            method: "POST",
+            path: [
+                "v1", "tasks", taskID, "actions", actionID,
+                "reconciliations", "definitely-not-started",
+            ],
             body: try JSONEncoder.floweroll.encode(body)
         )
         return try JSONDecoder.floweroll.decode(JSONValue.self, from: result.data)

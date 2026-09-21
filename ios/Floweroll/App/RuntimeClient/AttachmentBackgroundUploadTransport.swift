@@ -59,6 +59,37 @@ struct BackgroundAttachmentUploadJob: Codable, Equatable, Sendable {
     let offset: Int
     let recoveryCount: Int
     let bodyFileName: String
+    let laneID: String?
+
+    init(
+        attachment: PendingAttachment,
+        endpoint: String,
+        operation: Operation,
+        offset: Int,
+        recoveryCount: Int,
+        bodyFileName: String,
+        laneID: String? = nil
+    ) {
+        self.attachment = attachment
+        self.endpoint = endpoint
+        self.operation = operation
+        self.offset = offset
+        self.recoveryCount = recoveryCount
+        self.bodyFileName = bodyFileName
+        self.laneID = laneID
+    }
+
+    func withLaneID(_ laneID: String) -> Self {
+        Self(
+            attachment: attachment,
+            endpoint: endpoint,
+            operation: operation,
+            offset: offset,
+            recoveryCount: recoveryCount,
+            bodyFileName: bodyFileName,
+            laneID: laneID
+        )
+    }
 
     /// Socket bytes are display progress, never proof of durable completion.
     /// Resume offsets belong to the whole file; URLSession counts this request.
@@ -102,6 +133,133 @@ private struct BackgroundAttachmentUploadDescriptor: Codable, Sendable {
     enum CodingKeys: String, CodingKey {
         case fileID = "file_id"
         case offset, complete, file
+    }
+}
+
+
+struct BackgroundAttachmentUploadLaneState: Equatable, Sendable {
+    enum ExistingTaskDisposition: Equatable, Sendable {
+        case abort
+        case replaceStale(laneID: String)
+        case use(laneID: String)
+    }
+
+    private var immediateOwnerCounts: [String: Int] = [:]
+    private var activeBackgroundLaneIDs: [String: String] = [:]
+    private var retiredBackgroundLaneIDs: Set<String> = []
+    private var invalidatedLegacyAttachments: Set<String> = []
+
+    mutating func beginBackground(attachmentID: String) -> String? {
+        guard allowsBackgroundTransfer(attachmentID: attachmentID) else { return nil }
+        if let existing = activeBackgroundLaneIDs[attachmentID] { return existing }
+        let laneID = UUID().uuidString
+        activeBackgroundLaneIDs[attachmentID] = laneID
+        return laneID
+    }
+
+    mutating func prepareDiscoveredExistingTask(
+        attachmentID: String,
+        provisionalLaneID: String,
+        existingLaneID: String?,
+        replaceExisting: Bool
+    ) -> ExistingTaskDisposition {
+        guard immediateOwnerCounts[attachmentID, default: 0] == 0,
+              activeBackgroundLaneIDs[attachmentID] == provisionalLaneID,
+              !retiredBackgroundLaneIDs.contains(provisionalLaneID)
+        else { return .abort }
+
+        if replaceExisting {
+            if let existingLaneID {
+                retiredBackgroundLaneIDs.insert(existingLaneID)
+                if existingLaneID == provisionalLaneID {
+                    let replacement = UUID().uuidString
+                    activeBackgroundLaneIDs[attachmentID] = replacement
+                    return .replaceStale(laneID: replacement)
+                }
+            }
+            return .replaceStale(laneID: provisionalLaneID)
+        }
+
+        guard let existingLaneID else {
+            if invalidatedLegacyAttachments.contains(attachmentID) {
+                return .replaceStale(laneID: provisionalLaneID)
+            }
+            return .use(laneID: provisionalLaneID)
+        }
+        guard !retiredBackgroundLaneIDs.contains(existingLaneID) else {
+            return .replaceStale(laneID: provisionalLaneID)
+        }
+        if existingLaneID != provisionalLaneID {
+            retiredBackgroundLaneIDs.insert(provisionalLaneID)
+            activeBackgroundLaneIDs[attachmentID] = existingLaneID
+        }
+        return .use(laneID: existingLaneID)
+    }
+
+    mutating func adoptBackgroundJob(
+        attachmentID: String,
+        laneID: String?
+    ) -> String? {
+        guard immediateOwnerCounts[attachmentID, default: 0] == 0 else { return nil }
+        if let laneID {
+            guard !retiredBackgroundLaneIDs.contains(laneID) else { return nil }
+            if let active = activeBackgroundLaneIDs[attachmentID] {
+                guard active == laneID else { return nil }
+            } else {
+                activeBackgroundLaneIDs[attachmentID] = laneID
+            }
+            return laneID
+        }
+
+        guard !invalidatedLegacyAttachments.contains(attachmentID) else { return nil }
+        if let active = activeBackgroundLaneIDs[attachmentID] { return active }
+        let adopted = UUID().uuidString
+        activeBackgroundLaneIDs[attachmentID] = adopted
+        return adopted
+    }
+
+    func isCurrentBackgroundLane(attachmentID: String, laneID: String) -> Bool {
+        immediateOwnerCounts[attachmentID, default: 0] == 0
+            && activeBackgroundLaneIDs[attachmentID] == laneID
+            && !retiredBackgroundLaneIDs.contains(laneID)
+    }
+
+    mutating func finishBackground(attachmentID: String, laneID: String) -> Bool {
+        guard isCurrentBackgroundLane(attachmentID: attachmentID, laneID: laneID) else {
+            return false
+        }
+        activeBackgroundLaneIDs.removeValue(forKey: attachmentID)
+        retiredBackgroundLaneIDs.insert(laneID)
+        return true
+    }
+
+    mutating func retireBackground(attachmentID: String) {
+        if let laneID = activeBackgroundLaneIDs.removeValue(forKey: attachmentID) {
+            retiredBackgroundLaneIDs.insert(laneID)
+        }
+        invalidatedLegacyAttachments.insert(attachmentID)
+    }
+
+    mutating func beginImmediate(attachmentID: String) {
+        immediateOwnerCounts[attachmentID, default: 0] += 1
+        retireBackground(attachmentID: attachmentID)
+    }
+
+    mutating func endImmediate(attachmentID: String) {
+        guard let count = immediateOwnerCounts[attachmentID] else { return }
+        if count <= 1 {
+            immediateOwnerCounts.removeValue(forKey: attachmentID)
+        } else {
+            immediateOwnerCounts[attachmentID] = count - 1
+        }
+    }
+
+    func allowsBackgroundTransfer(attachmentID: String) -> Bool {
+        immediateOwnerCounts[attachmentID, default: 0] == 0
+    }
+
+    func immediateOwnerCount(attachmentID: String) -> Int {
+        immediateOwnerCounts[attachmentID] ?? 0
     }
 }
 
@@ -192,6 +350,7 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
     private var responseBodies: [Int: Data] = [:]
     private var tokenOverrides: [String: String] = [:]
     private var backgroundCompletionHandler: (() -> Void)?
+    private var laneState = BackgroundAttachmentUploadLaneState()
 
     private lazy var session: URLSession = {
         URLSession(
@@ -232,7 +391,14 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
             try await withCheckedThrowingContinuation { continuation in
                 guard waiter.install(continuation) else { return }
                 let shouldDiscoverExisting: Bool
+                let provisionalLaneID: String
                 lock.lock()
+                guard let laneID = laneState.beginBackground(attachmentID: attachment.id) else {
+                    lock.unlock()
+                    waiter.finish(.failure(CancellationError()))
+                    return
+                }
+                provisionalLaneID = laneID
                 if let bearerToken, !bearerToken.isEmpty {
                     tokenOverrides[attachment.id] = bearerToken
                 }
@@ -248,40 +414,67 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
                 guard shouldDiscoverExisting else { return }
                 session.getAllTasks { [weak self] tasks in
                     guard let self else { return }
+                    guard self.isCurrentBackgroundLane(
+                        attachmentID: attachment.id,
+                        laneID: provisionalLaneID
+                    ) else { return }
+
+                    var laneID = provisionalLaneID
                     if let existing = tasks.first(where: {
                         BackgroundAttachmentUploadJob.decode($0.taskDescription)?.attachment.id == attachment.id
-                    }), let job = BackgroundAttachmentUploadJob.decode(existing.taskDescription) {
-                        // Builds before this fix could leave a zero-byte background
-                        // `begin` task running indefinitely. Retire it without
-                        // delivering a cancellation to the new waiter; the normal
-                        // Host control plane already established startingOffset.
-                        if job.operation == .begin {
+                    }), let rawJob = BackgroundAttachmentUploadJob.decode(existing.taskDescription) {
+                        if rawJob.operation == .begin {
                             existing.taskDescription = nil
                             existing.cancel()
-                            self.removeBodyFile(job)
+                            self.removeBodyFile(rawJob)
                         } else {
-                            switch AttachmentBackgroundUploadPolicy.existingTaskDisposition(for: existing.state) {
-                            case .reuse:
-                                self.emitExistingTask(job, task: existing)
-                                return
-                            case .resume:
-                                existing.resume()
-                                self.emitExistingTask(job, task: existing)
-                                return
-                            case .replace:
-                                break
+                            let existingDisposition = AttachmentBackgroundUploadPolicy.existingTaskDisposition(
+                                for: existing.state
+                            )
+                            guard let prepared = self.prepareDiscoveredBackgroundJob(
+                                rawJob,
+                                task: existing,
+                                provisionalLaneID: provisionalLaneID,
+                                replaceExisting: existingDisposition == .replace
+                            ) else { return }
+                            laneID = prepared.laneID
+                            if prepared.replaceExisting {
+                                existing.taskDescription = nil
+                                existing.cancel()
+                                self.removeBodyFile(rawJob)
+                            } else {
+                                switch existingDisposition {
+                                case .reuse:
+                                    self.emitExistingTask(prepared.job, task: existing)
+                                    return
+                                case .resume:
+                                    guard self.resumeExistingTaskIfCurrent(
+                                        existing,
+                                        job: prepared.job
+                                    ) else { return }
+                                    self.emitExistingTask(prepared.job, task: existing)
+                                    return
+                                case .replace:
+                                    break
+                                }
                             }
                         }
                     }
+
                     do {
                         try self.scheduleChunk(
                             attachment: attachment,
                             baseURL: baseURL,
                             offset: startingOffset,
-                            recoveryCount: 0
+                            recoveryCount: 0,
+                            laneID: laneID
                         )
                     } catch {
-                        self.finish(attachmentID: attachment.id, result: .failure(error))
+                        self.finish(
+                            attachmentID: attachment.id,
+                            laneID: laneID,
+                            result: .failure(error)
+                        )
                     }
                 }
             }
@@ -292,8 +485,93 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
         }
     }
 
+    private struct PreparedBackgroundJob {
+        let job: BackgroundAttachmentUploadJob
+        let laneID: String
+        let replaceExisting: Bool
+    }
+
+    private func isCurrentBackgroundLane(attachmentID: String, laneID: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return laneState.isCurrentBackgroundLane(attachmentID: attachmentID, laneID: laneID)
+    }
+
+    private func prepareDiscoveredBackgroundJob(
+        _ rawJob: BackgroundAttachmentUploadJob,
+        task: URLSessionTask,
+        provisionalLaneID: String,
+        replaceExisting: Bool
+    ) -> PreparedBackgroundJob? {
+        lock.lock()
+        let disposition = laneState.prepareDiscoveredExistingTask(
+            attachmentID: rawJob.attachment.id,
+            provisionalLaneID: provisionalLaneID,
+            existingLaneID: rawJob.laneID,
+            replaceExisting: replaceExisting
+        )
+        lock.unlock()
+
+        switch disposition {
+        case .abort:
+            return nil
+        case let .replaceStale(laneID):
+            return PreparedBackgroundJob(
+                job: rawJob.withLaneID(laneID),
+                laneID: laneID,
+                replaceExisting: true
+            )
+        case let .use(laneID):
+            let job = rawJob.withLaneID(laneID)
+            if rawJob.laneID != laneID {
+                task.taskDescription = try? job.encodedDescription()
+            }
+            return PreparedBackgroundJob(
+                job: job,
+                laneID: laneID,
+                replaceExisting: false
+            )
+        }
+    }
+
+    private func claimBackgroundJob(
+        _ rawJob: BackgroundAttachmentUploadJob
+    ) -> BackgroundAttachmentUploadJob? {
+        lock.lock()
+        let laneID = laneState.adoptBackgroundJob(
+            attachmentID: rawJob.attachment.id,
+            laneID: rawJob.laneID
+        )
+        lock.unlock()
+        guard let laneID else { return nil }
+        return rawJob.withLaneID(laneID)
+    }
+
+    private func resumeExistingTaskIfCurrent(
+        _ task: URLSessionTask,
+        job: BackgroundAttachmentUploadJob
+    ) -> Bool {
+        guard let laneID = job.laneID else { return false }
+        lock.lock()
+        guard laneState.isCurrentBackgroundLane(
+            attachmentID: job.attachment.id,
+            laneID: laneID
+        ) else {
+            lock.unlock()
+            return false
+        }
+        task.resume()
+        lock.unlock()
+        return true
+    }
+
     private func emitExistingTask(_ job: BackgroundAttachmentUploadJob, task: URLSessionTask) {
-        emit(attachmentID: job.attachment.id, state: job.progressState(totalBytesSent: task.countOfBytesSent))
+        guard let laneID = job.laneID else { return }
+        emit(
+            attachmentID: job.attachment.id,
+            laneID: laneID,
+            state: job.progressState(totalBytesSent: task.countOfBytesSent)
+        )
     }
 
     /// Foreground recovery must refresh even when the Store still owns a lease
@@ -304,7 +582,9 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
             self.delegateQueue.addOperation { [weak self] in
                 guard let self else { return }
                 for task in tasks where task.state == .running || task.state == .suspended {
-                    guard let job = BackgroundAttachmentUploadJob.decode(task.taskDescription) else { continue }
+                    guard let rawJob = BackgroundAttachmentUploadJob.decode(task.taskDescription),
+                          let job = self.claimBackgroundJob(rawJob)
+                    else { continue }
                     self.emitExistingTask(job, task: task)
                 }
             }
@@ -318,10 +598,17 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
         totalBytesSent: Int64,
         totalBytesExpectedToSend: Int64
     ) {
-        guard let job = BackgroundAttachmentUploadJob.decode(task.taskDescription),
-              job.operation == .chunk else { return }
+        guard let rawJob = BackgroundAttachmentUploadJob.decode(task.taskDescription),
+              rawJob.operation == .chunk,
+              let job = claimBackgroundJob(rawJob)
+        else { return }
         Self.logger.debug("id=\(String(job.attachment.id.prefix(8)), privacy: .public) offset=\(job.offset) sent=\(totalBytesSent) total=\(job.attachment.sizeBytes)")
-        emit(attachmentID: job.attachment.id, state: job.progressState(totalBytesSent: totalBytesSent))
+        guard let laneID = job.laneID else { return }
+        emit(
+            attachmentID: job.attachment.id,
+            laneID: laneID,
+            state: job.progressState(totalBytesSent: totalBytesSent)
+        )
     }
 
     @discardableResult
@@ -342,20 +629,33 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
     }
 
     func cancel(attachmentID: String) {
-        finish(attachmentID: attachmentID, result: .failure(CancellationError()))
+        let values = claimImmediateUploadOwnership(attachmentID: attachmentID)
+        for value in values {
+            value.finish(.failure(CancellationError()))
+        }
         session.getAllTasks { [weak self] tasks in
+            guard let self else { return }
+            defer { self.endImmediateUploadHandoff(attachmentID: attachmentID) }
             for task in tasks where BackgroundAttachmentUploadJob.decode(task.taskDescription)?.attachment.id == attachmentID {
+                if let job = BackgroundAttachmentUploadJob.decode(task.taskDescription) {
+                    self.removeBodyFile(job)
+                }
+                task.taskDescription = nil
                 task.cancel()
             }
-            self?.removeTransferDirectory(attachmentID: attachmentID)
+            self.removeTransferDirectory(attachmentID: attachmentID)
         }
     }
 
     /// Retire the system-owned byte transfer for one exact file before a
-    /// latency-sensitive foreground send takes over the same Host resumable
-    /// offset. Host-confirmed offset remains the byte truth throughout.
-    func handoffToImmediateUpload(attachmentID: String) async {
-        finish(attachmentID: attachmentID, result: .failure(CancellationError()))
+    /// latency-sensitive foreground send owns the same Host resumable offset.
+    /// The marker stays active until endImmediateUploadHandoff().
+    func beginImmediateUploadHandoff(attachmentID: String) async {
+        let values = claimImmediateUploadOwnership(attachmentID: attachmentID)
+        for value in values {
+            value.finish(.failure(CancellationError()))
+        }
+
         let matchingTasks: [URLSessionTask] = await withCheckedContinuation { continuation in
             session.getAllTasks { tasks in
                 continuation.resume(returning: tasks.filter {
@@ -382,6 +682,20 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
         }
     }
 
+    private func claimImmediateUploadOwnership(attachmentID: String) -> [Waiter] {
+        lock.lock()
+        defer { lock.unlock() }
+        laneState.beginImmediate(attachmentID: attachmentID)
+        tokenOverrides.removeValue(forKey: attachmentID)
+        return waiters.removeValue(forKey: attachmentID) ?? []
+    }
+
+    func endImmediateUploadHandoff(attachmentID: String) {
+        lock.lock()
+        laneState.endImmediate(attachmentID: attachmentID)
+        lock.unlock()
+    }
+
     func urlSession(
         _ session: URLSession,
         dataTask: URLSessionDataTask,
@@ -397,20 +711,24 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
         task: URLSessionTask,
         didCompleteWithError error: Error?
     ) {
-        guard let job = BackgroundAttachmentUploadJob.decode(task.taskDescription) else { return }
         lock.lock()
         let body = responseBodies.removeValue(forKey: task.taskIdentifier) ?? Data()
         lock.unlock()
-        removeBodyFile(job)
+        guard let rawJob = BackgroundAttachmentUploadJob.decode(task.taskDescription) else { return }
+        removeBodyFile(rawJob)
+        guard let job = claimBackgroundJob(rawJob),
+              let laneID = job.laneID
+        else { return }
 
         if let error {
             if (error as? URLError)?.code == .cancelled {
-                finish(attachmentID: job.attachment.id, result: .failure(CancellationError()))
+                finish(attachmentID: job.attachment.id, laneID: laneID, result: .failure(CancellationError()))
                 return
             }
             if job.operation == .begin {
                 finish(
                     attachmentID: job.attachment.id,
+                    laneID: laneID,
                     result: .failure(MaterialsError.message("旧版附件确认任务未完成，已保留文件；重新发送会从服务器状态继续。"))
                 )
             } else {
@@ -434,7 +752,11 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
             if response.statusCode >= 500 {
                 recover(job, reason: error)
             } else {
-                finish(attachmentID: job.attachment.id, result: .failure(error))
+                finish(
+                    attachmentID: job.attachment.id,
+                    laneID: laneID,
+                    result: .failure(error)
+                )
             }
         }
     }
@@ -467,6 +789,7 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
         response: HTTPURLResponse,
         body: Data
     ) throws {
+        guard let laneID = job.laneID else { throw CancellationError() }
         guard [200, 201].contains(response.statusCode) else {
             throw productError(statusCode: response.statusCode)
         }
@@ -477,8 +800,12 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
         else { throw URLError(.badServerResponse) }
 
         if descriptor.complete {
-            guard let file = descriptor.file else { throw URLError(.badServerResponse) }
-            finish(attachmentID: job.attachment.id, result: .success(()))
+            guard descriptor.file != nil else { throw URLError(.badServerResponse) }
+            finish(
+                attachmentID: job.attachment.id,
+                laneID: laneID,
+                result: .success(())
+            )
             removeTransferDirectory(attachmentID: job.attachment.id)
             return
         }
@@ -487,6 +814,7 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
         }
         emit(
             attachmentID: job.attachment.id,
+            laneID: laneID,
             state: .uploading(
                 sentBytes: Int64(descriptor.offset),
                 totalBytes: Int64(job.attachment.sizeBytes)
@@ -496,7 +824,8 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
             attachment: job.attachment,
             baseURL: try endpoint(job),
             offset: descriptor.offset,
-            recoveryCount: job.nextRecoveryCount(confirmedOffset: descriptor.offset)
+            recoveryCount: job.nextRecoveryCount(confirmedOffset: descriptor.offset),
+            laneID: laneID
         )
     }
 
@@ -504,6 +833,7 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
         job: BackgroundAttachmentUploadJob,
         response: HTTPURLResponse
     ) throws {
+        guard let laneID = job.laneID else { throw CancellationError() }
         guard response.statusCode == 204 || response.statusCode == 409,
               let rawOffset = response.value(forHTTPHeaderField: "Upload-Offset"),
               let confirmedOffset = Int(rawOffset),
@@ -516,6 +846,7 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
         }
         emit(
             attachmentID: job.attachment.id,
+            laneID: laneID,
             state: .uploading(
                 sentBytes: Int64(confirmedOffset),
                 totalBytes: Int64(job.attachment.sizeBytes)
@@ -526,29 +857,44 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
             // PATCH offset is durable byte-transfer truth. The caller performs
             // the small immutable GET receipt on the ordinary session before
             // claiming attachment completion.
-            emit(attachmentID: job.attachment.id, state: .reconciling)
-            finish(attachmentID: job.attachment.id, result: .success(()))
+            emit(
+                attachmentID: job.attachment.id,
+                laneID: laneID,
+                state: .reconciling
+            )
+            finish(
+                attachmentID: job.attachment.id,
+                laneID: laneID,
+                result: .success(())
+            )
             removeTransferDirectory(attachmentID: job.attachment.id)
         } else {
             try scheduleChunk(
                 attachment: job.attachment,
                 baseURL: try endpoint(job),
                 offset: confirmedOffset,
-                recoveryCount: 0
+                recoveryCount: 0,
+                laneID: laneID
             )
         }
     }
 
     private func recover(_ job: BackgroundAttachmentUploadJob, reason: Error) {
+        guard let laneID = job.laneID else { return }
         let next = job.recoveryCount + 1
         guard next <= AttachmentBackgroundUploadPolicy.recoveryLimit else {
             finish(
                 attachmentID: job.attachment.id,
+                laneID: laneID,
                 result: .failure(MaterialsError.message("附件后台上传多次中断，已保留进度；重新打开花卷会从服务器确认位置继续。"))
             )
             return
         }
-        emit(attachmentID: job.attachment.id, state: .reconciling)
+        emit(
+            attachmentID: job.attachment.id,
+            laneID: laneID,
+            state: .reconciling
+        )
         do {
             // Replaying the exact same PATCH offset is safe: if Host committed
             // the prior bytes but its response was lost, it answers 409 with
@@ -557,10 +903,15 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
                 attachment: job.attachment,
                 baseURL: try endpoint(job),
                 offset: job.offset,
-                recoveryCount: next
+                recoveryCount: next,
+                laneID: laneID
             )
         } catch {
-            finish(attachmentID: job.attachment.id, result: .failure(error))
+            finish(
+                attachmentID: job.attachment.id,
+                laneID: laneID,
+                result: .failure(error)
+            )
         }
     }
 
@@ -571,7 +922,8 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
         attachment: PendingAttachment,
         baseURL: URL,
         offset: Int,
-        recoveryCount: Int
+        recoveryCount: Int,
+        laneID: String
     ) throws {
         guard offset >= 0, offset < attachment.sizeBytes else { throw URLError(.badURL) }
         let localURL = try attachment.fileURL()
@@ -607,9 +959,10 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
             operation: .chunk,
             offset: offset,
             recoveryCount: recoveryCount,
-            bodyFileName: bodyURL.lastPathComponent
+            bodyFileName: bodyURL.lastPathComponent,
+            laneID: laneID
         )
-        schedule(request: request, bodyURL: bodyURL, job: job, expectedBytes: wanted)
+        try schedule(request: request, bodyURL: bodyURL, job: job, expectedBytes: wanted)
     }
 
     private func schedule(
@@ -617,11 +970,23 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
         bodyURL: URL,
         job: BackgroundAttachmentUploadJob,
         expectedBytes: Int
-    ) {
+    ) throws {
+        lock.lock()
+        guard let laneID = job.laneID,
+              laneState.isCurrentBackgroundLane(
+                attachmentID: job.attachment.id,
+                laneID: laneID
+              )
+        else {
+            lock.unlock()
+            try? FileManager.default.removeItem(at: bodyURL)
+            throw CancellationError()
+        }
         let task = session.uploadTask(with: request, fromFile: bodyURL)
         task.taskDescription = try? job.encodedDescription()
         task.countOfBytesClientExpectsToSend = Int64(expectedBytes)
         task.resume()
+        lock.unlock()
     }
 
     private func authenticatedRequest(
@@ -691,16 +1056,35 @@ final class AttachmentBackgroundUploadTransport: NSObject, URLSessionDataDelegat
         try? FileManager.default.removeItem(at: root.appendingPathComponent(attachmentID, isDirectory: true))
     }
 
-    private func emit(attachmentID: String, state: AttachmentUploadState) {
+    private func emit(
+        attachmentID: String,
+        laneID: String,
+        state: AttachmentUploadState
+    ) {
         lock.lock()
+        guard laneState.isCurrentBackgroundLane(
+            attachmentID: attachmentID,
+            laneID: laneID
+        ) else {
+            lock.unlock()
+            return
+        }
         let callbacks = waiters[attachmentID]?.filter { !$0.isFinished }.compactMap(\.onEvent) ?? []
         lock.unlock()
         let event = AttachmentUploadEvent(attachmentID: attachmentID, state: state)
         for callback in callbacks { callback(event) }
     }
 
-    private func finish(attachmentID: String, result: Result<Void, Error>) {
+    private func finish(
+        attachmentID: String,
+        laneID: String,
+        result: Result<Void, Error>
+    ) {
         lock.lock()
+        guard laneState.finishBackground(attachmentID: attachmentID, laneID: laneID) else {
+            lock.unlock()
+            return
+        }
         let values = waiters.removeValue(forKey: attachmentID) ?? []
         tokenOverrides.removeValue(forKey: attachmentID)
         lock.unlock()

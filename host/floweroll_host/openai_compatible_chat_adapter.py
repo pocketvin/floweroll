@@ -39,6 +39,7 @@ class OpenAICompatibleChatPlannerAdapter:
         model: str,
         timeout_seconds: float = 90.0,
         max_completion_tokens_override: Optional[int] = None,
+        reasoning_effort_override: Optional[str] = None,
         transient_http_retries: int = 1,
     ) -> None:
         if not api_key.strip():
@@ -56,6 +57,13 @@ class OpenAICompatibleChatPlannerAdapter:
         if transient_http_retries < 0 or transient_http_retries > 2:
             raise ValueError("transient_http_retries must be between 0 and 2")
         self.max_completion_tokens_override = max_completion_tokens_override
+        if reasoning_effort_override is not None:
+            normalized_effort = reasoning_effort_override.strip().lower()
+            if normalized_effort not in {"low", "high", "max"}:
+                raise ValueError("reasoning_effort_override must be low, high, max, or None")
+            self.reasoning_effort_override = normalized_effort
+        else:
+            self.reasoning_effort_override = None
         self.transient_http_retries = int(transient_http_retries)
         self._metrics_local = threading.local()
 
@@ -247,6 +255,8 @@ class OpenAICompatibleChatPlannerAdapter:
             payload["max_completion_tokens"] = self.max_completion_tokens_override
         elif isinstance(max_output_tokens, int) and max_output_tokens > 0:
             payload["max_completion_tokens"] = max_output_tokens
+        if self.reasoning_effort_override is not None:
+            payload["reasoning_effort"] = self.reasoning_effort_override
         return payload
 
     def _chat_completions_url(self) -> str:

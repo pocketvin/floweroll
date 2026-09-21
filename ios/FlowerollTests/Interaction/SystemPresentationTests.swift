@@ -130,6 +130,28 @@ extension RuntimeInteractionPolicyTests {
         XCTAssertLessThan(update.completedUnitCount, update.totalUnitCount)
     }
 
+    func testActiveTaskCanNeedInputWhileAuthorizedWorkKeepsRunning() {
+        let activeWithClarification = continuedProcessingView(
+            status: "active",
+            activeTitle: "正在创建提醒",
+            pendingInteraction: .object([
+                "kind": .string("clarification"),
+                "clarification_id": .string("clar-active"),
+                "question": .string("酒店预算是多少？"),
+                "suggested_options": .array([]),
+                "accepts_text": .bool(true),
+            ])
+        )
+        XCTAssertEqual(activeWithClarification.runtimeStateDimensions.lifecycle, .active)
+        XCTAssertEqual(activeWithClarification.runtimeStateDimensions.interaction, .clarification)
+        XCTAssertEqual(activeWithClarification.presentationTruth.state, .needsUser)
+
+        let update = SystemEntryRuntimeCoordinator.progressUpdate(from: activeWithClarification)
+        XCTAssertEqual(update.title, "小卷正在处理")
+        XCTAssertEqual(update.subtitle, "正在创建提醒")
+        XCTAssertLessThan(update.completedUnitCount, update.totalUnitCount)
+    }
+
     func testTerminalHostTruthWinsOverStalePendingInteraction() {
         let staleInteraction: JSONValue = .object([
             "kind": .string("clarification"),
